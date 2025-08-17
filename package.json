@@ -1,0 +1,40 @@
+{
+  "name": "CQSclock",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "author": "Your Company",
+  "description": "Employee time tracking application with photo verification and OneDrive integration",
+  "keywords": [
+    "timeclock",
+    "employee",
+    "tracking",
+    "onedrive",
+    "sqlite"
+  ],
+  "license": "MIT",
+  "main": "server.js",
+  "packages": {},
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "scripts": {
+    "backup-db": "node scripts/backup-database.js",
+    "dev": "nodemon server.js",
+    "init-db": "node scripts/init-database.js",
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.1",
+    "helmet": "^8.1.0",
+    "multer": "^2.0.2",
+    "sqlite3": "^5.1.7"
+  }
+}
