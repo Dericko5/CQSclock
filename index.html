@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TimeTracker</title>
+    <title>TimeTracker Pro</title>
     <style>
         * {
             margin: 0;
@@ -218,6 +218,7 @@
             font-size: 16px;
             cursor: pointer;
             transition: all 0.3s ease;
+            margin: 5px;
         }
 
         .btn-camera:hover {
@@ -289,7 +290,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <div class="logo">⏰ CQS TimeTracker</div>
+            <div class="logo">⏰ TimeTracker Pro</div>
             <div class="subtitle">Employee Time Management</div>
         </div>
 
@@ -312,12 +313,12 @@
                     📷 Camera preview will appear here
                 </div>
                 <div class="camera-controls">
-                    <button class="btn-camera" id="cameraBtn" onclick="toggleCamera()">
+                    <button class="btn-camera" id="cameraBtn">
                         📸 Take Photo (Required)
                     </button>
                     <div style="margin: 10px 0; color: #666; font-size: 14px;">OR</div>
-                    <input type="file" id="fileInput" accept="image/*" style="display: none;" onchange="handleFileUpload(event)">
-                    <button class="btn-camera" onclick="document.getElementById('fileInput').click()">
+                    <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                    <button class="btn-camera" id="uploadBtn">
                         📁 Upload from Computer
                     </button>
                 </div>
@@ -325,16 +326,16 @@
         </div>
 
         <div class="action-buttons">
-            <button class="btn btn-clock-in" id="clockInBtn" onclick="clockIn()" disabled>
+            <button class="btn btn-clock-in" id="clockInBtn" disabled>
                 🟢 Clock In
             </button>
-            <button class="btn btn-clock-out" id="clockOutBtn" onclick="clockOut()" disabled>
+            <button class="btn btn-clock-out" id="clockOutBtn" disabled>
                 🔴 Clock Out
             </button>
         </div>
 
         <div class="footer">
-            © 2025  CQS TimeTracker - Secure Employee Time Management
+            © 2024 TimeTracker Pro - Secure Employee Time Management
         </div>
     </div>
 
@@ -345,6 +346,22 @@
         let capturedPhoto = null;
         let cameraStream = null;
         let video = null;
+
+        // Initialize everything when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add event listeners to buttons (CSP-friendly)
+            document.getElementById('cameraBtn').addEventListener('click', toggleCamera);
+            document.getElementById('uploadBtn').addEventListener('click', function() {
+                document.getElementById('fileInput').click();
+            });
+            document.getElementById('fileInput').addEventListener('change', handleFileUpload);
+            document.getElementById('clockInBtn').addEventListener('click', clockIn);
+            document.getElementById('clockOutBtn').addEventListener('click', clockOut);
+            
+            // Initialize other functionality
+            checkInitialStatus();
+            validateForm();
+        });
 
         // Check user status on page load
         window.addEventListener('load', async () => {
@@ -407,12 +424,9 @@
 
         // Check initial user status
         async function checkInitialStatus() {
-            const lastEmail = localStorage.getItem('lastEmail');
-            if (lastEmail) {
-                document.getElementById('emailInput').value = lastEmail;
-                userEmail = lastEmail;
-                await checkUserStatus(lastEmail);
-            }
+            // Note: In production, you can use localStorage.getItem('lastEmail')
+            // For now, users need to enter email each time
+            console.log('Page loaded - ready for user input');
         }
 
         // Check if user is currently clocked in
@@ -572,8 +586,8 @@
                     document.getElementById('statusText').innerHTML = 
                         'Status: <span class="status-clocked-in">Clocked In</span>';
                     
-                    // Store email for next time
-                    localStorage.setItem('lastEmail', userEmail);
+                    // Note: In production, you can store email with localStorage.setItem('lastEmail', userEmail)
+                    // For now, status is checked when user enters email
                     
                     validateForm();
                 } else {
@@ -646,9 +660,6 @@
                 messageDiv.remove();
             }, 5000);
         }
-
-        // Initialize form state
-        validateForm();
     </script>
 </body>
 </html>

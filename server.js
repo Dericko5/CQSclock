@@ -1,4 +1,4 @@
-// server.js - Main Express server
+// server.js - Complete Express server with OneDrive integration
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -7,307 +7,349 @@ const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+
+// Import OneDrive service and Database
+const OneDriveService = require('./middleware/onedrive');
 const Database = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Initialize database
+// Initialize database and OneDrive service
 const db = new Database();
+const oneDriveService = new OneDriveService();
 
-// Security middleware
-app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            scriptSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", "data:", "blob:"],
-            mediaSrc: ["'self'", "blob:"],
-        },
-    },
-}));
+// Env sanity
+const SERVICE_UPN = process.env.ONEDRIVE_SERVICE_UPN;
+if (!SERVICE_UPN) {
+  console.warn('⚠️  ONEDRIVE_SERVICE_UPN is not set in .env — uploads will fail. Set it to e.g. aldemarburbano@contractqualitysolutions.com');
+}
+console.log('📂 OneDrive folder base:', process.env.ONEDRIVE_FOLDER_PATH || 'TimeClock_Photos');
 
-// Rate limiting
+// Email authorization
+const authorizedEmails = (process.env.AUTHORIZED_EMAILS || '')
+  .split(',')
+  .map(e => e.trim())
+  .filter(Boolean);
+function isAuthorizedEmail(email) {
+  if (authorizedEmails.length === 0) return true; // allow all if unset
+  return authorizedEmails.includes((email || '').toLowerCase());
+}
+
+// Security middleware (CSP can break inline scripts/styles in simple demos; enable if you need)
+// app.use(helmet());
+
 const limiter = rateLimit({
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-    message: {
-        error: 'Too many requests from this IP, please try again later.'
-    }
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  message: { error: 'Too many requests from this IP, please try again later.' }
 });
 app.use('/api/', limiter);
 
-// CORS configuration
+// CORS
 app.use(cors({
-    origin: process.env.NODE_ENV === 'production' 
-        ? ['https://yourdomain.com'] // Replace with your actual domain
-        : ['http://localhost:3000', 'http://127.0.0.1:3000'],
-    credentials: true
+  origin: process.env.NODE_ENV === 'production'
+    ? ['https://yourdomain.com']
+    : ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  credentials: true
 }));
 
-// Body parsing middleware
+// Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Serve static files (your frontend)
+// Static files (serves index.html at /)
 app.use(express.static(path.join(__dirname)));
 
-// Ensure upload directories exist
-const uploadDir = path.join(__dirname, 'uploads', 'temp');
-if (!fs.existsSync(uploadDir)) {
+// Ensure upload directory exists
+const uploadDir = path.join(__dirname, 'uploads');
+try {
+  if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
+    console.log(`✅ Created upload directory: ${uploadDir}`);
+  } else {
+    console.log(`✅ Upload directory exists: ${uploadDir}`);
+  }
+} catch (err) {
+  console.error('❌ Failed to create upload directory:', err);
 }
 
-// Configure multer for file uploads
+// Multer: disk storage to ./uploads
 const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, uploadDir);
-    },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, 'photo-' + uniqueSuffix + path.extname(file.originalname));
-    }
+  destination: function (_req, _file, cb) {
+    cb(null, uploadDir);
+  },
+  filename: function (_req, file, cb) {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname || '.jpg');
+    cb(null, `photo-${unique}${ext}`);
+  }
 });
-
 const upload = multer({
-    storage: storage,
-    limits: {
-        fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024, // 5MB default
-    },
-    fileFilter: (req, file, cb) => {
-        const allowedTypes = (process.env.ALLOWED_FILE_TYPES || 'image/jpeg,image/png,image/jpg').split(',');
-        if (allowedTypes.includes(file.mimetype)) {
-            cb(null, true);
-        } else {
-            cb(new Error('Invalid file type. Only JPEG, PNG, and JPG files are allowed.'));
-        }
-    }
+  storage,
+  limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = (process.env.ALLOWED_FILE_TYPES || 'image/jpeg,image/png,image/jpg')
+      .split(',')
+      .map(t => t.trim());
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Invalid file type. Only JPEG, PNG, and JPG files are allowed.'));
+  }
 });
 
-// API Routes
+// Background OneDrive upload helper
+async function uploadToOneDriveAsync(photoPath, email, timeRecordId, photoRecordId) {
+  try {
+    console.log(`📤 Starting OneDrive upload for ${email}...`);
+    const result = await oneDriveService.uploadFile(
+      photoPath,
+      `clock-in-${Date.now()}.jpg`,
+      email
+    );
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: 'OK', 
-        timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV || 'development'
-    });
+    // Persist OneDrive URL to your photo_uploads row
+    await db.updatePhotoOneDriveUrl(photoRecordId, result.oneDriveUrl);
+
+    // Cleanup local file
+    await oneDriveService.cleanupLocalFile(photoPath);
+
+    console.log(`✅ OneDrive upload completed for ${email}: ${result.oneDriveUrl}`);
+  } catch (error) {
+    const status = error?.response?.status;
+    const body = error?.response?.data;
+    console.error(`❌ OneDrive upload failed for ${email}:`, status || '', body || error.message);
+    // Keep local file so you can retry later if needed
+  }
+}
+
+// --- API Routes ---
+
+app.get('/api/health', (_req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
-// Get user status (check if clocked in)
 app.get('/api/status/:email', async (req, res) => {
-    try {
-        const { email } = req.params;
-        
-        if (!email || !email.includes('@')) {
-            return res.status(400).json({ error: 'Valid email is required' });
-        }
+  try {
+    const { email } = req.params;
+    if (!email || !email.includes('@')) return res.status(400).json({ error: 'Valid email is required' });
 
-        const activeSession = await db.getActiveSession(email);
-        
-        res.json({
-            isLoggedIn: !!activeSession,
-            session: activeSession || null,
-            timestamp: new Date().toISOString()
-        });
-    } catch (error) {
-        console.error('Status check error:', error);
-        res.status(500).json({ error: 'Failed to check user status' });
-    }
+    const activeSession = await db.getActiveSession(email);
+    res.json({
+      isLoggedIn: !!activeSession,
+      session: activeSession || null,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Status check error:', error);
+    res.status(500).json({ error: 'Failed to check user status' });
+  }
 });
 
-// Clock in endpoint
+// Clock-in (photo required)
 app.post('/api/clock-in', upload.single('photo'), async (req, res) => {
-    try {
-        const { email } = req.body;
-        
-        if (!email || !email.includes('@')) {
-            return res.status(400).json({ error: 'Valid email is required' });
-        }
+  try {
+    const { email } = req.body;
 
-        if (!req.file) {
-            return res.status(400).json({ error: 'Photo is required for clock in' });
-        }
-
-        // For now, we'll store the local file path. Later we'll upload to OneDrive
-        const photoPath = req.file.path;
-        
-        const result = await db.clockIn(email, photoPath);
-        
-        // Save photo record
-        await db.savePhotoRecord(
-            result.timeRecordId,
-            email,
-            req.file.originalname,
-            req.file.filename,
-            req.file.size
-        );
-
-        console.log(`✅ Clock in successful: ${email} at ${result.clockInTime}`);
-        
-        res.json({
-            success: true,
-            message: 'Successfully clocked in',
-            data: result,
-            timestamp: new Date().toISOString()
-        });
-
-        // TODO: Upload photo to OneDrive in background
-        // uploadToOneDrive(photoPath, email, result.timeRecordId);
-
-    } catch (error) {
-        console.error('Clock in error:', error);
-        
-        // Clean up uploaded file if there was an error
-        if (req.file && fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
-        }
-        
-        if (error.message.includes('already clocked in')) {
-            res.status(409).json({ error: error.message });
-        } else {
-            res.status(500).json({ error: 'Failed to clock in' });
-        }
+    if (!email || !email.includes('@')) {
+      // Cleanup file if present
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Valid email is required' });
     }
+    if (!isAuthorizedEmail(email)) {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(403).json({ error: 'Email not authorized to use this system' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'Photo is required for clock in' });
+
+    const photoPath = req.file.path;
+
+    // 1) Clock in
+    const result = await db.clockIn(email, photoPath);
+
+    // 2) Save photo record (local info first)
+    const photoRecord = await db.savePhotoRecord(
+      result.timeRecordId,
+      email,
+      req.file.originalname,
+      req.file.filename,
+      req.file.size
+    );
+
+    console.log(`✅ Clock in successful: ${email} at ${result.clockInTime}`);
+
+    // 3) Upload to OneDrive in the background; DB link updated when done
+    uploadToOneDriveAsync(photoPath, email, result.timeRecordId, photoRecord.id);
+
+    res.json({
+      success: true,
+      message: 'Successfully clocked in',
+      data: result,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Clock in error:', error);
+    if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+
+    if (String(error.message || '').includes('already clocked in')) {
+      res.status(409).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to clock in' });
+    }
+  }
 });
 
-// Clock out endpoint
+// Clock-out
 app.post('/api/clock-out', async (req, res) => {
-    try {
-        const { email } = req.body;
-        
-        if (!email || !email.includes('@')) {
-            return res.status(400).json({ error: 'Valid email is required' });
-        }
+  try {
+    const { email } = req.body;
+    if (!email || !email.includes('@')) return res.status(400).json({ error: 'Valid email is required' });
 
-        const result = await db.clockOut(email);
-        
-        console.log(`✅ Clock out successful: ${email} at ${result.clockOutTime} (${result.totalHours} hours)`);
-        
-        res.json({
-            success: true,
-            message: 'Successfully clocked out',
-            data: result,
-            timestamp: new Date().toISOString()
-        });
+    const result = await db.clockOut(email);
+    console.log(`✅ Clock out successful: ${email} at ${result.clockOutTime} (${result.totalHours} hours)`);
 
-    } catch (error) {
-        console.error('Clock out error:', error);
-        
-        if (error.message.includes('No active session')) {
-            res.status(404).json({ error: error.message });
-        } else {
-            res.status(500).json({ error: 'Failed to clock out' });
-        }
+    res.json({
+      success: true,
+      message: 'Successfully clocked out',
+      data: result,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Clock out error:', error);
+    if (String(error.message || '').includes('No active session')) {
+      res.status(404).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to clock out' });
     }
+  }
 });
 
-// Get time records for a user
+// Time records for a user
 app.get('/api/records/:email', async (req, res) => {
-    try {
-        const { email } = req.params;
-        const { startDate, endDate } = req.query;
-        
-        if (!email || !email.includes('@')) {
-            return res.status(400).json({ error: 'Valid email is required' });
-        }
+  try {
+    const { email } = req.params;
+    const { startDate, endDate } = req.query;
+    if (!email || !email.includes('@')) return res.status(400).json({ error: 'Valid email is required' });
 
-        const records = await db.getTimeRecordsForUser(email, startDate, endDate);
-        
-        res.json({
-            success: true,
-            data: records,
-            count: records.length,
-            timestamp: new Date().toISOString()
-        });
-
-    } catch (error) {
-        console.error('Get records error:', error);
-        res.status(500).json({ error: 'Failed to retrieve time records' });
-    }
+    const records = await db.getTimeRecordsForUser(email, startDate, endDate);
+    res.json({
+      success: true,
+      data: records,
+      count: records.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Get records error:', error);
+    res.status(500).json({ error: 'Failed to retrieve time records' });
+  }
 });
 
-// Admin endpoint - get all currently logged in users
-app.get('/api/admin/active-users', async (req, res) => {
-    try {
-        const activeUsers = await db.getCurrentlyLoggedInUsers();
-        
-        res.json({
-            success: true,
-            data: activeUsers,
-            count: activeUsers.length,
-            timestamp: new Date().toISOString()
-        });
-
-    } catch (error) {
-        console.error('Get active users error:', error);
-        res.status(500).json({ error: 'Failed to retrieve active users' });
-    }
+// Admin: active users
+app.get('/api/admin/active-users', async (_req, res) => {
+  try {
+    const activeUsers = await db.getCurrentlyLoggedInUsers();
+    res.json({
+      success: true,
+      data: activeUsers,
+      count: activeUsers.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Get active users error:', error);
+    res.status(500).json({ error: 'Failed to retrieve active users' });
+  }
 });
 
-// Admin endpoint - get all time records
+// Admin: all time records
 app.get('/api/admin/all-records', async (req, res) => {
-    try {
-        const { startDate, endDate } = req.query;
-        const records = await db.getAllTimeRecords(startDate, endDate);
-        
-        res.json({
-            success: true,
-            data: records,
-            count: records.length,
-            timestamp: new Date().toISOString()
-        });
-
-    } catch (error) {
-        console.error('Get all records error:', error);
-        res.status(500).json({ error: 'Failed to retrieve time records' });
-    }
+  try {
+    const { startDate, endDate } = req.query;
+    const records = await db.getAllTimeRecords(startDate, endDate);
+    res.json({
+      success: true,
+      data: records,
+      count: records.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Get all records error:', error);
+    res.status(500).json({ error: 'Failed to retrieve time records' });
+  }
 });
 
-// Serve the main HTML file
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+// OneDrive admin: list files
+app.get('/api/admin/onedrive-files', async (_req, res) => {
+  try {
+    const files = await oneDriveService.listFiles();
+    res.json({ success: true, data: files, count: files.length });
+  } catch (error) {
+    console.error('Failed to list OneDrive files:', error?.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to retrieve OneDrive files' });
+  }
 });
 
-// Handle 404s
-//app.use('*', (req, res) => {
-//    res.status(404).json({ error: 'Endpoint not found' });
-//});
+// OneDrive admin: connection test
+app.get('/api/admin/test-onedrive', async (_req, res) => {
+  try {
+    await oneDriveService.getAccessToken();
+    await oneDriveService.ensurePathExists(oneDriveService.folderPath); // ✅ fixed
+    res.json({
+      success: true,
+      message: 'OneDrive connection successful',
+      folder: oneDriveService.folderPath
+    });
+  } catch (error) {
+    console.error('OneDrive test failed:', error?.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: 'OneDrive connection failed',
+      details: error.message
+    });
+  }
+});
+
+// Serve index
+app.get('/', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// 404
+app.use((req, res) => {
+  res.status(404).json({ error: 'Endpoint not found' });
+});
 
 // Global error handler
-app.use((error, req, res, next) => {
-    console.error('Global error handler:', error);
-    
-    if (error instanceof multer.MulterError) {
-        if (error.code === 'LIMIT_FILE_SIZE') {
-            return res.status(400).json({ error: 'File too large' });
-        }
-        return res.status(400).json({ error: 'File upload error' });
+app.use((error, _req, res, _next) => {
+  console.error('Global error handler:', error);
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'File too large' });
     }
-    
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(400).json({ error: 'File upload error' });
+  }
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`🚀 TimeTracker server running on port ${PORT}`);
-    console.log(`📱 Frontend available at: http://localhost:${PORT}`);
-    console.log(`🔗 API endpoints at: http://localhost:${PORT}/api`);
-    console.log(`🗄️  Database: ${db.dbPath}`);
-    console.log(`📁 Upload directory: ${uploadDir}`);
+  console.log(`🚀 TimeTracker server running on port ${PORT}`);
+  console.log(`📱 Frontend: http://localhost:${PORT}`);
+  console.log(`🔗 API base: http://localhost:${PORT}/api`);
+  console.log(`🗄️  Database: ${db.dbPath}`);
+  console.log(`📁 Upload directory: ${uploadDir}`);
 });
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-    console.log('\n🛑 Shutting down server...');
-    db.close();
-    process.exit(0);
+  console.log('\n🛑 Shutting down server...');
+  db.close();
+  process.exit(0);
 });
-
 process.on('SIGTERM', () => {
-    console.log('\n🛑 Server terminated');
-    db.close();
-    process.exit(0);
+  console.log('\n🛑 Server terminated');
+  db.close();
+  process.exit(0);
 });

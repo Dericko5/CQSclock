@@ -113,103 +113,85 @@ class Database {
 
     // Time tracking methods
     async clockIn(userEmail, photoUrl = null) {
-        return new Promise(async (resolve, reject) => {
-            try {
-                // First, get or create user
-                let user = await this.getUserByEmail(userEmail);
-                if (!user) {
-                    user = await this.createUser(userEmail);
-                }
+    return new Promise(async (resolve, reject) => {
+        try {
+        let user = await this.getUserByEmail(userEmail);
+        if (!user) user = await this.createUser(userEmail);
 
-                // Check if already clocked in
-                const activeSession = await this.getActiveSession(userEmail);
-                if (activeSession) {
-                    reject(new Error('User is already clocked in'));
-                    return;
-                }
+        const activeSession = await this.getActiveSession(userEmail);
+        if (activeSession) return reject(new Error('User is already clocked in'));
 
-                const clockInTime = new Date().toISOString();
+        const clockInTime = new Date().toISOString();
 
-                // Create time record
-                this.db.run(`
-                    INSERT INTO time_records (user_id, email, clock_in_time, photo_url, status)
-                    VALUES (?, ?, ?, ?, 'active')
-                `, [user.id, userEmail, clockInTime, photoUrl], function(err) {
-                    if (err) {
-                        reject(err);
-                    } else {
-                        const timeRecordId = this.lastID;
+        const db = this.db; // <— capture it
 
-                        // Create active session
-                        this.db.run(`
-                            INSERT INTO active_sessions (user_id, email, time_record_id, clock_in_time, photo_url)
-                            VALUES (?, ?, ?, ?, ?)
-                        `, [user.id, userEmail, timeRecordId, clockInTime, photoUrl], function(err) {
-                            if (err) {
-                                reject(err);
-                            } else {
-                                resolve({
-                                    timeRecordId,
-                                    sessionId: this.lastID,
-                                    clockInTime,
-                                    userEmail,
-                                    photoUrl
-                                });
-                            }
-                        });
-                    }
-                });
-            } catch (error) {
-                reject(error);
-            }
+        db.run(`
+            INSERT INTO time_records (user_id, email, clock_in_time, photo_url, status)
+            VALUES (?, ?, ?, ?, 'active')
+        `, [user.id, userEmail, clockInTime, photoUrl], function (err) {
+            if (err) return reject(err);
+
+            const timeRecordId = this.lastID; // ok: "this" here is the statement for THIS run
+
+            db.run(`
+            INSERT INTO active_sessions (user_id, email, time_record_id, clock_in_time, photo_url)
+            VALUES (?, ?, ?, ?, ?)
+            `, [user.id, userEmail, timeRecordId, clockInTime, photoUrl], function (err) {
+            if (err) return reject(err);
+
+            resolve({
+                timeRecordId,
+                sessionId: this.lastID, // ok: statement for the second run
+                clockInTime,
+                userEmail,
+                photoUrl
+            });
+            });
         });
+        } catch (e) {
+        reject(e);
+        }
+    });
     }
+
 
     async clockOut(userEmail) {
-        return new Promise(async (resolve, reject) => {
-            try {
-                // Get active session
-                const activeSession = await this.getActiveSession(userEmail);
-                if (!activeSession) {
-                    reject(new Error('No active session found for this user'));
-                    return;
-                }
+    return new Promise(async (resolve, reject) => {
+        try {
+        const activeSession = await this.getActiveSession(userEmail);
+        if (!activeSession) return reject(new Error('No active session found for this user'));
 
-                const clockOutTime = new Date().toISOString();
-                const clockInTime = new Date(activeSession.clock_in_time);
-                const clockOutTimeObj = new Date(clockOutTime);
-                const totalHours = (clockOutTimeObj - clockInTime) / (1000 * 60 * 60); // Convert to hours
+        const clockOutTime = new Date().toISOString();
+        const clockInTime = new Date(activeSession.clock_in_time);
+        const totalHours = (new Date(clockOutTime) - clockInTime) / 36e5;
 
-                // Update time record
-                this.db.run(`
-                    UPDATE time_records 
-                    SET clock_out_time = ?, total_hours = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                `, [clockOutTime, totalHours.toFixed(2), activeSession.time_record_id], function(err) {
-                    if (err) {
-                        reject(err);
-                    } else {
-                        // Remove active session
-                        this.db.run('DELETE FROM active_sessions WHERE id = ?', [activeSession.id], function(err) {
-                            if (err) {
-                                reject(err);
-                            } else {
-                                resolve({
-                                    timeRecordId: activeSession.time_record_id,
-                                    clockInTime: activeSession.clock_in_time,
-                                    clockOutTime,
-                                    totalHours: totalHours.toFixed(2),
-                                    userEmail
-                                });
-                            }
-                        });
-                    }
-                });
-            } catch (error) {
-                reject(error);
-            }
+        const db = this.db; // <— capture
+
+        db.run(`
+            UPDATE time_records
+            SET clock_out_time = ?, total_hours = ?, status = 'completed', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        `, [clockOutTime, totalHours.toFixed(2), activeSession.time_record_id], function (err) {
+            if (err) return reject(err);
+
+            db.run('DELETE FROM active_sessions WHERE id = ?', [activeSession.id], function (err) {
+            if (err) return reject(err);
+
+            resolve({
+                timeRecordId: activeSession.time_record_id,
+                clockInTime: activeSession.clock_in_time,
+                clockOutTime,
+                totalHours: totalHours.toFixed(2),
+                userEmail
+            });
+            });
         });
+        } catch (e) {
+        reject(e);
+        }
+    });
     }
+
 
     async getActiveSession(userEmail) {
         return new Promise((resolve, reject) => {
@@ -234,6 +216,84 @@ class Database {
                     reject(err);
                 } else {
                     resolve({ id: this.lastID, timeRecordId, userEmail, originalFilename, storedFilename });
+                }
+            });
+        });
+    }
+
+    async updatePhotoOneDriveUrl(photoId, oneDriveUrl) {
+        return new Promise((resolve, reject) => {
+            this.db.run(`
+                UPDATE photo_uploads 
+                SET onedrive_url = ?, upload_status = 'uploaded'
+                WHERE id = ?
+            `, [oneDriveUrl, photoId], function(err) {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve({ photoId, oneDriveUrl });
+                }
+            });
+        });
+    }
+
+    // Reporting methods
+    async getTimeRecordsForUser(userEmail, startDate = null, endDate = null) {
+        return new Promise((resolve, reject) => {
+            let query = 'SELECT * FROM time_records WHERE email = ?';
+            let params = [userEmail];
+
+            if (startDate && endDate) {
+                query += ' AND clock_in_time BETWEEN ? AND ?';
+                params.push(startDate, endDate);
+            }
+
+            query += ' ORDER BY clock_in_time DESC';
+
+            this.db.all(query, params, (err, rows) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(rows);
+                }
+            });
+        });
+    }
+
+    async getAllTimeRecords(startDate = null, endDate = null) {
+        return new Promise((resolve, reject) => {
+            let query = 'SELECT tr.*, u.first_name, u.last_name, u.department FROM time_records tr LEFT JOIN users u ON tr.user_id = u.id';
+            let params = [];
+
+            if (startDate && endDate) {
+                query += ' WHERE tr.clock_in_time BETWEEN ? AND ?';
+                params.push(startDate, endDate);
+            }
+
+            query += ' ORDER BY tr.clock_in_time DESC';
+
+            this.db.all(query, params, (err, rows) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(rows);
+                }
+            });
+        });
+    }
+
+    async getCurrentlyLoggedInUsers() {
+        return new Promise((resolve, reject) => {
+            this.db.all(`
+                SELECT a.*, u.first_name, u.last_name, u.department
+                FROM active_sessions a
+                LEFT JOIN users u ON a.user_id = u.id
+                ORDER BY a.clock_in_time DESC
+            `, (err, rows) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(rows);
                 }
             });
         });
