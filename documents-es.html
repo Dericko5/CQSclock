@@ -292,9 +292,9 @@
     };
 
     // Prefer the PDF you added to the repo
-    if (await exists('/IRS-Form-W9-2024.pdf')) {
-      link.href = '/IRS-Form-W9-2024.pdf';
-      link.setAttribute('download', 'IRS-Form-W9-2024.pdf'); // keep as download; remove if you want to view
+    if (await exists('/w9.PDF')) {
+      link.href = '/w9.PDF';
+      link.setAttribute('download', 'w9.PDF'); // keep as download; remove if you want to view
       return;
     }
 
