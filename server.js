@@ -1,69 +1,186 @@
-// server.js - Complete Express server with OneDrive integration
+// server.js — Express app with OneDrive + robust PDF.js W-9 viewer/download
 require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
+
+const express   = require('express');
+const cors      = require('cors');
+// const helmet = require('helmet'); // If you enable this, configure a CSP that allows pdf.js and your inline <script>/<style>
 const rateLimit = require('express-rate-limit');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const multer    = require('multer');
+const path      = require('path');
+const fs        = require('fs');
 
-// Import OneDrive service and Database
+// ───────────────────────────────────────────────────────────────────────────────
+// PDF.js + W-9
+// ───────────────────────────────────────────────────────────────────────────────
+
+// Your W-9 file (make sure the file name & casing matches what's in the repo)
+const W9_FILE     = process.env.W9_FILE || 'IRS-Form-W9-2024.pdf';
+const W9_ABS_PATH = path.join(__dirname, W9_FILE);
+console.log('📄 W-9 path:', W9_ABS_PATH);
+
+// Find pdfjs-dist viewer & build dirs no matter which layout your version uses
+function resolvePdfjs() {
+  // Candidate viewer.html paths (in order of most common)
+  const viewerCandidates = [
+    'pdfjs-dist/web/viewer.html',                  // older layout
+    'pdfjs-dist/build/generic/web/viewer.html',    // newer layout
+    'pdfjs-dist/legacy/web/viewer.html',           // legacy build
+    'pdfjs-dist/es5/web/viewer.html',              // es5 build
+    'pdfjs-dist/build/minified/web/viewer.html',   // minified build
+  ];
+  let viewerHtml = null;
+  for (const c of viewerCandidates) {
+    try {
+      viewerHtml = require.resolve(c);
+      break;
+    } catch { /* try next */ }
+  }
+  if (!viewerHtml) return null;
+
+  const viewerDir = path.dirname(viewerHtml);
+
+  // Try to locate a build folder that contains pdf.js / pdf.worker.*
+  const buildCandidates = [
+    path.resolve(viewerDir, '..', 'build'),
+    path.resolve(viewerDir, '..', 'build', 'minified'),
+    path.resolve(viewerDir, '..', 'generic', 'build'),
+    path.resolve(viewerDir, '..', '..', 'build'),
+    path.resolve(viewerDir, '..', '..', 'build', 'minified'),
+  ];
+
+  let buildDir = null;
+  for (const b of buildCandidates) {
+    if (
+      fs.existsSync(path.join(b, 'pdf.js')) ||
+      fs.existsSync(path.join(b, 'pdf.mjs')) ||
+      fs.existsSync(path.join(b, 'pdf.min.js'))
+    ) {
+      buildDir = b;
+      break;
+    }
+  }
+
+  return { viewerDir, buildDir };
+}
+
+const pdfjs = resolvePdfjs();
+if (!pdfjs) {
+  console.error('❌ Could not locate pdfjs-dist viewer.html. Did you run `npm i pdfjs-dist`?');
+} else {
+  console.log('📦 Serving PDF.js viewer from:', pdfjs.viewerDir);
+  console.log('📦 Serving PDF.js build  from:', pdfjs.buildDir || '(none found)');
+
+  // Serve the viewer directory at /pdfjs/web (images, cmaps, locale, viewer.html, etc.)
+  appStaticMount('/pdfjs/web', pdfjs.viewerDir);
+
+  // Serve the build directory (pdf.js, workers, mjs). Some layouts don’t need this, but expose it anyway.
+  if (pdfjs.buildDir) {
+    appStaticMount('/pdfjs/build', pdfjs.buildDir);
+  }
+
+  // Helper to mount static with .mjs content-type fix
+  function appStaticMount(route, dir) {
+    // Defined below after `const app = express()`, but hoisted by function usage—we’ll rebind after app creation.
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// App / Services
+// ───────────────────────────────────────────────────────────────────────────────
 const OneDriveService = require('./middleware/onedrive');
-const Database = require('./database');
+const Database        = require('./database');
 
-const app = express();
+const app  = express();
 const PORT = process.env.PORT || 3000;
 
-// Initialize database and OneDrive service
-const db = new Database();
-const oneDriveService = new OneDriveService();
-const oneDriveDocsService = new OneDriveService({
+// Bind the static helper now that `app` exists
+function mountStaticFixed(route, dir) {
+  app.use(route, express.static(dir, {
+    setHeaders(res, filePath) {
+      // Some hosts serve .mjs incorrectly; make sure it's JS so the browser runs it
+      if (filePath.endsWith('.mjs')) {
+        res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+      }
+    }
+  }));
+}
+// Re-run the pdf.js mounts (if resolved) now that we can call app.use
+(function rebindPdfJs() {
+  const pdfjs2 = resolvePdfjs();
+  if (!pdfjs2) return;
+  console.log('📦 (bind) PDF.js viewer:', pdfjs2.viewerDir);
+  console.log('📦 (bind) PDF.js build :', pdfjs2.buildDir || '(none)');
+  mountStaticFixed('/pdfjs/web', pdfjs2.viewerDir);
+  if (pdfjs2.buildDir) mountStaticFixed('/pdfjs/build', pdfjs2.buildDir);
+})();
+
+const db                 = new Database();
+const oneDriveService    = new OneDriveService();
+const oneDriveDocs       = new OneDriveService({
   folderPath: process.env.ONEDRIVE_DOCS_FOLDER_PATH || 'Worker_Documents'
 });
 
-// Env sanity
-const SERVICE_UPN = process.env.ONEDRIVE_SERVICE_UPN;
-if (!SERVICE_UPN) {
-  console.warn('⚠️  ONEDRIVE_SERVICE_UPN is not set in .env — uploads will fail. Set it to e.g. aldemarburbano@contractqualitysolutions.com');
+// ───────────────────────────────────────────────────────────────────────────────
+// Environment sanity
+// ───────────────────────────────────────────────────────────────────────────────
+if (!process.env.ONEDRIVE_SERVICE_UPN) {
+  console.warn('⚠️  ONEDRIVE_SERVICE_UPN is not set in .env — uploads will fail.');
 }
-console.log('📂 OneDrive folder base:', process.env.ONEDRIVE_FOLDER_PATH || 'TimeClock_Photos');
+console.log('📂 OneDrive base folder:', process.env.ONEDRIVE_FOLDER_PATH || 'TimeClock_Photos');
 
-// Email authorization
-const authorizedEmails = (process.env.AUTHORIZED_EMAILS || '')
-  .split(',')
-  .map(e => e.trim())
-  .filter(Boolean);
-function isAuthorizedEmail(email) {
-  if (authorizedEmails.length === 0) return true; // allow all if unset
-  return authorizedEmails.includes((email || '').toLowerCase());
-}
-
-// Security middleware (CSP can break inline scripts/styles in simple demos; enable if you need)
-// app.use(helmet());
-
+// ───────────────────────────────────────────────────────────────────────────────
+// Middleware
+// ───────────────────────────────────────────────────────────────────────────────
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-  message: { error: 'Too many requests from this IP, please try again later.' }
+  max:      parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  message:  { error: 'Too many requests from this IP, please try again later.' }
 });
 app.use('/api/', limiter);
 
-// CORS
+// If you enable helmet(), add an appropriate CSP for pdf.js/inline styles/scripts
+// app.use(helmet());
+
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
-    ? ['https://cqsclock.onrender.com']            // or your custom domain
+    ? ['https://cqsclock.onrender.com']
     : ['http://localhost:3000', 'http://127.0.0.1:3000'],
   credentials: true,
 }));
-// Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Static files (serves index.html at /)
+// Serve your site files (index.html, etc.) from the project root
 app.use(express.static(path.join(__dirname)));
 
-// Ensure upload directory exists
+// ───────────────────────────────────────────────────────────────────────────────
+// Shortcuts for W-9
+// ───────────────────────────────────────────────────────────────────────────────
+app.get('/w9', (_req, res) => {
+  const fileUrl = encodeURIComponent('/' + W9_FILE);
+  // Loads the in-browser viewer
+  res.redirect(`/pdfjs/web/viewer.html?file=${fileUrl}#view=FitH&pagemode=none`);
+});
+
+// Force download (mobile-friendly)
+app.get('/download/w9', (_req, res, next) => {
+  fs.access(W9_ABS_PATH, fs.constants.R_OK, (err) => {
+    if (err) return res.status(404).send('W-9 file not found');
+    res.download(W9_ABS_PATH, path.basename(W9_ABS_PATH), (e) => e && next(e));
+  });
+});
+
+// Lightweight HEAD probe (if you use it client-side)
+app.head('/download/w9', (_req, res) => {
+  fs.access(W9_ABS_PATH, fs.constants.R_OK, (err) => res.sendStatus(err ? 404 : 200));
+});
+
+// Back-compat redirects
+app.all(['/w9.pdf', '/W9.pdf'], (_req, res) => res.redirect(302, '/download/w9'));
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Upload directories & Multer
+// ───────────────────────────────────────────────────────────────────────────────
 const uploadDir = path.join(__dirname, 'uploads');
 try {
   if (!fs.existsSync(uploadDir)) {
@@ -76,170 +193,119 @@ try {
   console.error('❌ Failed to create upload directory:', err);
 }
 
-// Multer: disk storage to ./uploads
 const storage = multer.diskStorage({
-  destination(req, file, cb) {
-    const destPath = path.join(__dirname, 'uploads');
-    if (!fs.existsSync(destPath)) fs.mkdirSync(destPath, { recursive: true });
-    cb(null, destPath);
+  destination(_req, _file, cb) {
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
   },
-  filename(req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+  filename(_req, file, cb) {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const ext = path.extname(file.originalname || '');
-    cb(null, 'photo-' + uniqueSuffix + (ext || '.jpg'));
+    cb(null, 'photo-' + unique + (ext || '.jpg'));
   }
 });
 
-// NEW: docs storage (separate prefix)
 const docStorage = multer.diskStorage({
-  destination(req, file, cb) {
-    const destPath = path.join(__dirname, 'uploads');
-    if (!fs.existsSync(destPath)) fs.mkdirSync(destPath, { recursive: true });
-    cb(null, destPath);
+  destination(_req, _file, cb) {
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
   },
-  filename(req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+  filename(_req, file, cb) {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const ext = path.extname(file.originalname || '');
-    cb(null, 'doc-' + uniqueSuffix + (ext || ''));
+    cb(null, 'doc-' + unique + (ext || ''));
   }
 });
 
-// For photos (unchanged)
 const upload = multer({
   storage,
   limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
-  fileFilter(req, file, cb) {
+  fileFilter(_req, file, cb) {
     const allowed = (process.env.ALLOWED_FILE_TYPES || 'image/jpeg,image/png,image/jpg').split(',');
     allowed.includes(file.mimetype) ? cb(null, true) : cb(new Error('Invalid file type.'));
   }
 });
 
-// For documents (PDF + images)
 const uploadDocs = multer({
   storage: docStorage,
   limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
-  fileFilter(req, file, cb) {
+  fileFilter(_req, file, cb) {
     const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
     allowed.includes(file.mimetype) ? cb(null, true) : cb(new Error('Invalid file type. Allowed: PDF, JPG, PNG.'));
   }
 });
 
-
-// Background OneDrive upload helper
-async function uploadToOneDriveAsync(photoPath, email, timeRecordId, photoRecordId) {
-  try {
-    console.log(`📤 Starting OneDrive upload for ${email}...`);
-    const result = await oneDriveService.uploadFile(
-      photoPath,
-      `clock-in-${Date.now()}.jpg`,
-      email
-    );
-
-    // Persist OneDrive URL to your photo_uploads row
-    await db.updatePhotoOneDriveUrl(photoRecordId, result.oneDriveUrl);
-
-    // Cleanup local file
-    await oneDriveService.cleanupLocalFile(photoPath);
-
-    console.log(`✅ OneDrive upload completed for ${email}: ${result.oneDriveUrl}`);
-  } catch (error) {
-    const status = error?.response?.status;
-    const body = error?.response?.data;
-    console.error(`❌ OneDrive upload failed for ${email}:`, status || '', body || error.message);
-    // Keep local file so you can retry later if needed
-  }
+// ───────────────────────────────────────────────────────────────────────────────
+// Helpers & config
+// ───────────────────────────────────────────────────────────────────────────────
+const authorizedEmails = (process.env.AUTHORIZED_EMAILS || '')
+  .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+function isAuthorizedEmail(email) {
+  if (authorizedEmails.length === 0) return true;
+  return authorizedEmails.includes((email || '').toLowerCase());
 }
 
-// --- API Routes ---
+async function uploadToOneDriveAsync(localPath, subFolder, remoteName) {
+  const result = await oneDriveService.uploadFile(localPath, remoteName, subFolder);
+  await oneDriveService.cleanupLocalFile(localPath);
+  return result;
+}
 
+const locationsConfigPath = path.join(__dirname, 'config', 'locations.json');
+let LOCATIONS = { locations: [] };
+try { LOCATIONS = JSON.parse(fs.readFileSync(locationsConfigPath, 'utf8')); }
+catch { console.warn('⚠️  config/locations.json missing or invalid; dropdown will be empty.'); }
+
+const DAILY_UPLOAD_LIMIT = parseInt(process.env.DAILY_UPLOAD_LIMIT || '5', 10);
+const UNIVERSAL_CODE     = (process.env.UNIVERSAL_CODE || '').trim();
+
+// ───────────────────────────────────────────────────────────────────────────────
+// API
+// ───────────────────────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  });
+  res.json({ status: 'OK', timestamp: new Date().toISOString(), environment: process.env.NODE_ENV || 'development' });
 });
 
 app.get('/api/status/:email', async (req, res) => {
   try {
     const { email } = req.params;
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'Valid email is required' });
-
-    const activeSession = await db.getActiveSession(email);
-    res.json({
-      isLoggedIn: !!activeSession,
-      session: activeSession || null,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Status check error:', error);
+    const active = await db.getActiveSession(email);
+    res.json({ isLoggedIn: !!active, session: active || null, timestamp: new Date().toISOString() });
+  } catch (e) {
+    console.error('Status error:', e);
     res.status(500).json({ error: 'Failed to check user status' });
   }
 });
-// Load locations
-const locationsConfigPath = path.join(__dirname, 'config', 'locations.json');
-let LOCATIONS = { locations: [] };
-try {
-  LOCATIONS = JSON.parse(fs.readFileSync(locationsConfigPath, 'utf8'));
-} catch {
-  console.warn('⚠️  config/locations.json missing or invalid; the dropdown will be empty.');
-}
 
-const DAILY_UPLOAD_LIMIT = parseInt(process.env.DAILY_UPLOAD_LIMIT || '5', 10);
-const UNIVERSAL_CODE = process.env.UNIVERSAL_CODE || '';
-
-// Locations list for the dropdown
 app.get('/api/locations', (_req, res) => {
   res.json({ ok: true, locations: LOCATIONS.locations || [] });
 });
 
-// Submit photo to location (code + location + photo)
 app.post('/api/submit', upload.single('photo'), async (req, res) => {
   try {
-    const code = (req.body.code || '').trim();
+    const code     = (req.body.code || '').trim();
     const location = (req.body.location || '').trim();
-    if (!code || !location) {
-      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'Code and location are required' });
-    }
-    if (!UNIVERSAL_CODE || code !== UNIVERSAL_CODE) {
-      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(401).json({ error: 'Invalid code' });
-    }
-    if (!LOCATIONS.locations.includes(location)) {
-      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'Unknown location' });
-    }
+    if (!code || !location) throw new Error('Code and location are required');
+    if (!UNIVERSAL_CODE || code !== UNIVERSAL_CODE) return res.status(401).json({ error: 'Invalid code' });
+    if (!LOCATIONS.locations.includes(location)) return res.status(400).json({ error: 'Unknown location' });
     if (!req.file) return res.status(400).json({ error: 'Photo is required' });
 
-    // Enforce daily limit per code+location
     const todayCount = await db.countLocationUploadsToday(code, location);
     if (todayCount >= DAILY_UPLOAD_LIMIT) {
-      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      fs.existsSync(req.file.path) && fs.unlinkSync(req.file.path);
       return res.status(429).json({ error: `Daily limit reached (${DAILY_UPLOAD_LIMIT}) for ${location}` });
     }
 
-    // Record locally first
     const localRec = await db.recordLocationUpload(
       code, location, req.file.originalname, req.file.filename, req.file.size
     );
 
-    // Upload to OneDrive under <base>/<location>
-    const info = await oneDriveService.uploadFile(
-      req.file.path,
-      req.file.originalname,
-      location // ← this becomes the subfolder instead of email
-    );
-
-    // Save OneDrive URL and cleanup local
-    await db.setLocationUploadUrl(localRec.id, info.oneDriveUrl);
+    const uploaded = await oneDriveService.uploadFile(req.file.path, req.file.originalname, location);
+    await db.setLocationUploadUrl(localRec.id, uploaded.oneDriveUrl);
     await oneDriveService.cleanupLocalFile(req.file.path);
 
-    res.json({
-      ok: true,
-      location,
-      webUrl: info.oneDriveUrl
-    });
+    res.json({ ok: true, location, webUrl: uploaded.oneDriveUrl });
   } catch (e) {
     console.error('submit error:', e?.response?.data || e.message);
     if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
@@ -247,172 +313,105 @@ app.post('/api/submit', upload.single('photo'), async (req, res) => {
   }
 });
 
-
-// Clock-in (photo required)
 app.post('/api/clock-in', upload.single('photo'), async (req, res) => {
   try {
     const { email } = req.body;
-
-    if (!email || !email.includes('@')) {
-      // Cleanup file if present
-      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: 'Valid email is required' });
-    }
-    if (!isAuthorizedEmail(email)) {
-      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(403).json({ error: 'Email not authorized to use this system' });
-    }
+    if (!email || !email.includes('@')) throw new Error('Valid email is required');
+    if (!isAuthorizedEmail(email)) return res.status(403).json({ error: 'Email not authorized to use this system' });
     if (!req.file) return res.status(400).json({ error: 'Photo is required for clock in' });
 
-    const photoPath = req.file.path;
+    const clock = await db.clockIn(email, req.file.path);
+    const photoRecord = await db.savePhotoRecord(clock.timeRecordId, email, req.file.originalname, req.file.filename, req.file.size);
 
-    // 1) Clock in
-    const result = await db.clockIn(email, photoPath);
+    // background upload
+    uploadToOneDriveAsync(req.file.path, email, `clock-in-${Date.now()}.jpg`)
+      .then(info => db.updatePhotoOneDriveUrl(photoRecord.id, info.oneDriveUrl))
+      .catch(err => console.error('OneDrive async upload failed:', err?.response?.data || err.message));
 
-    // 2) Save photo record (local info first)
-    const photoRecord = await db.savePhotoRecord(
-      result.timeRecordId,
-      email,
-      req.file.originalname,
-      req.file.filename,
-      req.file.size
-    );
-
-    console.log(`✅ Clock in successful: ${email} at ${result.clockInTime}`);
-
-    // 3) Upload to OneDrive in the background; DB link updated when done
-    uploadToOneDriveAsync(photoPath, email, result.timeRecordId, photoRecord.id);
-
-    res.json({
-      success: true,
-      message: 'Successfully clocked in',
-      data: result,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Clock in error:', error);
+    res.json({ success: true, message: 'Successfully clocked in', data: clock, timestamp: new Date().toISOString() });
+  } catch (e) {
+    console.error('Clock in error:', e);
     if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-
-    if (String(error.message || '').includes('already clocked in')) {
-      res.status(409).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to clock in' });
-    }
+    if (String(e.message || '').includes('already clocked in')) return res.status(409).json({ error: e.message });
+    res.status(500).json({ error: 'Failed to clock in' });
   }
 });
 
-// Clock-out
 app.post('/api/clock-out', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'Valid email is required' });
-
     const result = await db.clockOut(email);
-    console.log(`✅ Clock out successful: ${email} at ${result.clockOutTime} (${result.totalHours} hours)`);
-
-    res.json({
-      success: true,
-      message: 'Successfully clocked out',
-      data: result,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Clock out error:', error);
-    if (String(error.message || '').includes('No active session')) {
-      res.status(404).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'Failed to clock out' });
-    }
+    res.json({ success: true, message: 'Successfully clocked out', data: result, timestamp: new Date().toISOString() });
+  } catch (e) {
+    console.error('Clock out error:', e);
+    if (String(e.message || '').includes('No active session')) return res.status(404).json({ error: e.message });
+    res.status(500).json({ error: 'Failed to clock out' });
   }
 });
 
-// Time records for a user
 app.get('/api/records/:email', async (req, res) => {
   try {
     const { email } = req.params;
     const { startDate, endDate } = req.query;
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'Valid email is required' });
-
     const records = await db.getTimeRecordsForUser(email, startDate, endDate);
-    res.json({
-      success: true,
-      data: records,
-      count: records.length,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Get records error:', error);
+    res.json({ success: true, data: records, count: records.length, timestamp: new Date().toISOString() });
+  } catch (e) {
+    console.error('Get records error:', e);
     res.status(500).json({ error: 'Failed to retrieve time records' });
   }
 });
 
-// Admin: active users
 app.get('/api/admin/active-users', async (_req, res) => {
   try {
     const activeUsers = await db.getCurrentlyLoggedInUsers();
-    res.json({
-      success: true,
-      data: activeUsers,
-      count: activeUsers.length,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Get active users error:', error);
+    res.json({ success: true, data: activeUsers, count: activeUsers.length, timestamp: new Date().toISOString() });
+  } catch (e) {
+    console.error('Get active users error:', e);
     res.status(500).json({ error: 'Failed to retrieve active users' });
   }
 });
 
-// Admin: all time records
 app.get('/api/admin/all-records', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const records = await db.getAllTimeRecords(startDate, endDate);
-    res.json({
-      success: true,
-      data: records,
-      count: records.length,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Get all records error:', error);
+    res.json({ success: true, data: records, count: records.length, timestamp: new Date().toISOString() });
+  } catch (e) {
+    console.error('Get all records error:', e);
     res.status(500).json({ error: 'Failed to retrieve time records' });
   }
 });
 
-// OneDrive admin: list files
 app.get('/api/admin/onedrive-files', async (_req, res) => {
   try {
     const files = await oneDriveService.listFiles();
     res.json({ success: true, data: files, count: files.length });
-  } catch (error) {
-    console.error('Failed to list OneDrive files:', error?.response?.data || error.message);
+  } catch (e) {
+    console.error('Failed to list OneDrive files:', e?.response?.data || e.message);
     res.status(500).json({ error: 'Failed to retrieve OneDrive files' });
   }
 });
 
-// OneDrive admin: connection test
 app.get('/api/admin/test-onedrive', async (_req, res) => {
   try {
     await oneDriveService.getAccessToken();
-    await oneDriveService.ensurePathExists(oneDriveService.folderPath); // ✅ fixed
-    res.json({
-      success: true,
-      message: 'OneDrive connection successful',
-      folder: oneDriveService.folderPath
-    });
-  } catch (error) {
-    console.error('OneDrive test failed:', error?.response?.data || error.message);
-    res.status(500).json({
-      success: false,
-      error: 'OneDrive connection failed',
-      details: error.message
-    });
+    await oneDriveService.ensurePathExists(oneDriveService.folderPath);
+    res.json({ success: true, message: 'OneDrive connection successful', folder: oneDriveService.folderPath });
+  } catch (e) {
+    console.error('OneDrive test failed:', e?.response?.data || e.message);
+    res.status(500).json({ success: false, error: 'OneDrive connection failed', details: e.message });
   }
 });
 
-app.get('/documents', (req, res) => {
+// ───────────────────────────────────────────────────────────────────────────────
+// Pages
+// ───────────────────────────────────────────────────────────────────────────────
+app.get('/documents', (_req, res) => {
   res.sendFile(path.join(__dirname, 'documents.html'));
 });
+
 app.post('/api/documents/submit',
   uploadDocs.fields([{ name: 'w9', maxCount: 1 }, { name: 'license', maxCount: 1 }]),
   async (req, res) => {
@@ -421,19 +420,13 @@ app.post('/api/documents/submit',
       const firstRaw = (req.body.firstName || '').trim();
       const lastRaw  = (req.body.lastName  || '').trim();
 
-      if (!code || code !== (process.env.UNIVERSAL_CODE || '').trim()) {
-        return res.status(401).json({ error: 'Invalid access code' });
-      }
-      if (!firstRaw || !lastRaw) {
-        return res.status(400).json({ error: 'First & last name required' });
-      }
+      if (!code || code !== UNIVERSAL_CODE) return res.status(401).json({ error: 'Invalid access code' });
+      if (!firstRaw || !lastRaw)           return res.status(400).json({ error: 'First & last name required' });
 
       const w9 = (req.files?.w9 || [])[0];
       const dl = (req.files?.license || [])[0];
-      if (!w9 || !dl) return res.status(400).json({ error: 'W-9 and Driver’s License are required' });
-      if (w9.mimetype !== 'application/pdf') {
-        return res.status(400).json({ error: 'W-9 must be a PDF' });
-      }
+      if (!w9 || !dl)                      return res.status(400).json({ error: 'W-9 and Driver’s License are required' });
+      if (w9.mimetype !== 'application/pdf') return res.status(400).json({ error: 'W-9 must be a PDF' });
 
       const sanitize = s => (s || '').replace(/[^A-Za-z0-9]/g,'').trim();
       const first = sanitize(firstRaw);
@@ -441,29 +434,23 @@ app.post('/api/documents/submit',
       const nameBase = (first + last) || 'Unknown';
 
       const ts   = new Date().toISOString().replace(/[:.]/g, '-');
-      const rand = Math.random().toString(36).slice(2, 8); // make sure it's unique
+      const rand = Math.random().toString(36).slice(2, 8);
 
       const w9Name = `${nameBase}_W9form_${ts}_${rand}.pdf`;
       const dlExt  = (path.extname(dl.originalname || '').toLowerCase() || '.jpg');
       const dlName = `${nameBase}_DriversLicense_${ts}_${rand}${dlExt}`;
-      // --- W-9 file config (override with W9_FILE in .env if you want) ---
-      const W9_FILE     = process.env.W9_FILE || 'w9.PDF';
-      const W9_ABS_PATH = path.join(__dirname, W9_FILE);
 
-
-      // All new-hire docs go here
       const subFolder = 'New_Hires';
 
       const [w9Result, dlResult] = await Promise.all([
-        oneDriveDocsService.uploadFile(w9.path, w9Name, subFolder),
-        oneDriveDocsService.uploadFile(dl.path, dlName, subFolder),
+        oneDriveDocs.uploadFile(w9.path, w9Name, subFolder),
+        oneDriveDocs.uploadFile(dl.path, dlName, subFolder),
       ]);
 
-      // cleanup local temp files
-      try { if (w9.path) fs.existsSync(w9.path) && fs.unlinkSync(w9.path); } catch {}
-      try { if (dl.path) fs.existsSync(dl.path) && fs.unlinkSync(dl.path); } catch {}
+      try { w9.path && fs.existsSync(w9.path) && fs.unlinkSync(w9.path); } catch {}
+      try { dl.path && fs.existsSync(dl.path) && fs.unlinkSync(dl.path); } catch {}
 
-      return res.json({
+      res.json({
         success: true,
         firstName: firstRaw,
         lastName: lastRaw,
@@ -474,46 +461,21 @@ app.post('/api/documents/submit',
       console.error('Documents submit error:', err?.response?.data || err.message);
       try { (req.files?.w9 || []).forEach(f => fs.existsSync(f.path) && fs.unlinkSync(f.path)); } catch {}
       try { (req.files?.license || []).forEach(f => fs.existsSync(f.path) && fs.unlinkSync(f.path)); } catch {}
-      return res.status(500).json({ error: 'Failed to upload documents' });
+      res.status(500).json({ error: 'Failed to upload documents' });
     }
   }
 );
 
-
-
-
-// Serve index
+// Root
 app.get('/', (_req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
-app.get('/download/w9', (req, res, next) => {
-  fs.access(W9_ABS_PATH, fs.constants.R_OK, (err) => {
-    if (err) return res.status(404).send('W-9 file not found');
-    // res.download sets Content-Disposition: attachment; filename="..."
-    res.download(W9_ABS_PATH, path.basename(W9_ABS_PATH), (e) => {
-      if (e) next(e);
-    });
-  });
-});
 
-// Lightweight availability check for your HEAD fetch
-app.head('/download/w9', (req, res) => {
-  fs.access(W9_ABS_PATH, fs.constants.R_OK, (err) => {
-    res.status(err ? 404 : 200).end();
-  });
-});
+// ───────────────────────────────────────────────────────────────────────────────
+// 404 & Error handler (last)
+// ───────────────────────────────────────────────────────────────────────────────
+app.use((req, res) => res.status(404).json({ error: 'Endpoint not found' }));
 
-// Back-compat: if any page still links to /w9.pdf, redirect to the forced-download route
-app.all(['/w9.pdf', '/W9.pdf'], (req, res) => {
-  res.redirect(302, '/download/w9');
-});
-
-// 404
-app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint not found' });
-});
-
-// Global error handler
 app.use((error, _req, res, _next) => {
   console.error('Global error handler:', error);
   if (error instanceof multer.MulterError) {
@@ -525,23 +487,13 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start server
+// ───────────────────────────────────────────────────────────────────────────────
+// Start
+// ───────────────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`🚀 TimeTracker server running on port ${PORT}`);
   console.log(`📱 Frontend: http://localhost:${PORT}`);
   console.log(`🔗 API base: http://localhost:${PORT}/api`);
   console.log(`🗄️  Database: ${db.dbPath}`);
   console.log(`📁 Upload directory: ${uploadDir}`);
-});
-
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down server...');
-  db.close();
-  process.exit(0);
-});
-process.on('SIGTERM', () => {
-  console.log('\n🛑 Server terminated');
-  db.close();
-  process.exit(0);
 });
