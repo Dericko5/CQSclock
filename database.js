@@ -5,7 +5,7 @@ const path = require('path');
 class Database {
     constructor() {
         // Create database file in project root
-        this.dbPath = path.join(__dirname, 'timeclock.db');
+        this.dbPath = process.env.DB_PATH || path.join(__dirname, 'timeclock.db');
         this.db = new sqlite3.Database(this.dbPath);
         this.initializeTables();
     }

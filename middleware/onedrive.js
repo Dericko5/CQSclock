@@ -3,23 +3,20 @@ const axios = require('axios');
 const fs = require('fs');
 
 class OneDriveService {
-  constructor() {
+  constructor(opts = {}) {
     this.clientId = process.env.AZURE_CLIENT_ID;
     this.clientSecret = process.env.AZURE_CLIENT_SECRET;
     this.tenantId = process.env.AZURE_TENANT_ID;
 
-    // Base folder (in the TARGET user's drive)
-    this.folderPath = process.env.ONEDRIVE_FOLDER_PATH || 'TimeClock_Photos';
+    // Base folder (allow override for docs)
+    this.folderPath = (opts.folderPath || process.env.ONEDRIVE_FOLDER_PATH || 'TimeClock_Photos');
 
-    // App runs as this account (for audit only; token is app-only)
+    // App runs as this account, but we write into TARGET user
     this.serviceUpn = process.env.ONEDRIVE_SERVICE_UPN;
-
-    // NEW: the user whose OneDrive we actually write into (Angelica)
     this.targetUpn  = process.env.ONEDRIVE_TARGET_UPN || this.serviceUpn;
 
-    // Optional: pin directly to a specific drive/folder (rock-solid)
     this.driveId    = process.env.ONEDRIVE_DRIVE_ID || null;
-    this.rootItemId = process.env.ONEDRIVE_ROOT_ITEM_ID || null;
+    this.rootItemId = null;
 
     this.accessToken = null;
     this.tokenExpiry = null;

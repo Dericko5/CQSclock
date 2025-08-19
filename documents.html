@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>CQS | Worker Documents</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{min-height:100vh;display:flex;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#fff;background:linear-gradient(135deg,#0a0a0a,#1a1a1a)}
+  .container{width:100%;max-width:480px;margin:auto;padding:24px}
+  .logo{font-size:26px;font-weight:800;color:#00ff88;text-align:center;text-shadow:0 0 20px rgba(0,255,136,.3)}
+  .subtitle{text-align:center;color:#9aa0a6;margin:6px 0 20px}
+  .card{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:16px;padding:18px;margin-bottom:16px;backdrop-filter:blur(10px)}
+  label{display:block;color:#cfd3d7;font-size:14px;margin:10px 0 8px}
+  input,select{width:100%;padding:14px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);color:#fff;margin-bottom:14px;outline:none;transition:border-color .2s,box-shadow .2s}
+  input:focus,select:focus{border-color:#00ff88;box-shadow:0 0 8px rgba(0,255,136,.2)}
+  select{appearance:none;-webkit-appearance:none;-moz-appearance:none;background-image:
+    linear-gradient(45deg,transparent 50%,#bbb 50%),
+    linear-gradient(135deg,#bbb 50%,transparent 50%),
+    linear-gradient(to right,transparent,transparent);
+    background-position:calc(100% - 20px) calc(50% - 4px),calc(100% - 14px) calc(50% - 4px),calc(100% - 2.2em) .6em;
+    background-size:6px 6px,6px 6px,1px 1.4em;background-repeat:no-repeat;padding-right:2.6em}
+  select option{background:#0f0f0f;color:#fff}
+  .btn{width:100%;padding:16px;border:0;border-radius:12px;font-weight:700;letter-spacing:.5px;cursor:pointer;transition:transform .15s,box-shadow .15s,opacity .15s}
+  .btn:disabled{opacity:.55;cursor:not-allowed}
+  .btn-primary{background:linear-gradient(135deg,#00ff88,#00cc6a);color:#000;box-shadow:0 6px 24px rgba(0,255,136,.3)}
+  .btn-primary:not(:disabled):hover{transform:translateY(-1px)}
+  .btn-link{display:inline-block;text-align:center;padding:12px 16px;border-radius:10px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#cfd3d7;text-decoration:none}
+  .btn-link:hover{transform:translateY(-1px)}
+  .msg{display:none;padding:12px;margin-bottom:16px;border-radius:10px;font-weight:600;text-align:center}
+  .msg.ok{display:block;background:linear-gradient(135deg,#00ff88,#00cc6a);color:#000}
+  .msg.err{display:block;background:linear-gradient(135deg,#ff6b6b,#ee5a52);color:#fff}
+  .note{color:#9aa0a6;font-size:12px;margin-top:-8px;margin-bottom:12px}
+  .back{display:block;text-align:center;margin-top:12px;color:#cfd3d7;text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="logo">CQS Documents</div>
+  <div class="subtitle">Upload a W-9 and a Driver’s License</div>
+
+  <div id="message" class="msg"></div>
+
+  <!-- W-9 download -->
+  <div class="card" id="w9Card">
+    <label>Need a blank W-9?</label>
+    <div class="note">Tap to download, fill, then upload below.</div>
+    <a id="w9Download" class="btn-link" href="/w9.pdf" download>⬇️ Download W-9 (PDF)</a>
+  </div>
+
+  <div class="card">
+    <label for="code">Access Code</label>
+    <input id="code" type="password" placeholder="Enter code" required />
+
+    <label for="firstName">First Name</label>
+    <input id="firstName" type="text" placeholder="Enter first name" required />
+
+    <label for="lastName">Last Name</label>
+    <input id="lastName" type="text" placeholder="Enter last name" required />
+
+    <label for="location">Location</label>
+    <select id="location" required>
+      <option value="">Select a location…</option>
+    </select>
+
+    <label for="w9">W-9 (PDF only)</label>
+    <input id="w9" type="file" accept="application/pdf,.pdf" required />
+
+    <label for="license">Driver’s License (Image or PDF)</label>
+    <input id="license" type="file" accept="image/*,application/pdf,.pdf" required />
+
+    <button id="submitBtn" class="btn btn-primary" disabled>Submit Documents</button>
+    <a class="back" href="/">← Back to Clock</a>
+  </div>
+</div>
+
+<script>
+  const el = id => document.getElementById(id);
+  let msgTimer=null;
+
+  function showMsg(t, ok=true){ const m=el('message'); m.style.display='block'; m.className='msg '+(ok?'ok':'err'); m.textContent=t; if(msgTimer) clearTimeout(msgTimer); msgTimer=setTimeout(()=>m.style.display='none',5000); }
+  function enable(){
+    el('submitBtn').disabled = !(
+      el('code').value.trim() &&
+      el('firstName').value.trim() &&
+      el('lastName').value.trim() &&
+      el('location').value &&
+      el('w9').files[0] &&
+      el('license').files[0]
+    );
+  }
+
+  async function loadLocations(){
+    try{
+      const r = await fetch('/api/locations'); const j = await r.json();
+      const sel = el('location');
+      (j.locations||[]).slice().sort((a,b)=>a.localeCompare(b,'en',{sensitivity:'base'})).forEach(n=>{
+        const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o);
+      });
+    }catch(e){ console.error(e); }
+  }
+
+  // If you haven't placed /w9.pdf in the repo, this will fall back to IRS link.
+  (async () => {
+    try {
+      const head = await fetch('/w9.pdf', { method:'HEAD' });
+      if (!head.ok) throw new Error();
+    } catch {
+      // fallback to IRS (optional)
+      el('w9Download').href = 'https://www.irs.gov/pub/irs-pdf/fw9.pdf';
+      el('w9Download').removeAttribute('download');
+    }
+  })();
+
+  ['code','firstName','lastName','location'].forEach(id=>{
+    el(id).addEventListener('input', enable);
+    el(id).addEventListener('change', enable);
+  });
+  el('w9').addEventListener('change', enable);
+  el('license').addEventListener('change', enable);
+
+  el('submitBtn').onclick = async ()=>{
+    const btn = el('submitBtn'); btn.disabled=true; btn.textContent='Uploading…';
+    try{
+      const w9 = el('w9').files[0], dl = el('license').files[0];
+      if(!w9 || !dl) throw new Error('Both files are required');
+      if(w9.type!=='application/pdf') throw new Error('W-9 must be a PDF');
+
+      const fd = new FormData();
+      fd.append('code', el('code').value.trim());
+      fd.append('firstName', el('firstName').value.trim());
+      fd.append('lastName', el('lastName').value.trim());
+      fd.append('location', el('location').value);
+      fd.append('w9', w9, w9.name || 'w9.pdf');
+      fd.append('license', dl, dl.name || 'license');
+
+      const r = await fetch('/api/documents/submit', { method:'POST', body: fd });
+      const j = await r.json();
+      if(!r.ok) throw new Error(j.error || 'Upload failed');
+
+      showMsg('✅ Documents uploaded successfully');
+      // reset
+      el('code').value=''; el('firstName').value=''; el('lastName').value='';
+      el('location').selectedIndex=0;
+      el('w9').value=''; el('license').value='';
+      btn.textContent='Submit Documents'; enable();
+    }catch(e){
+      console.error(e); showMsg('❌ '+e.message, false); btn.textContent='Submit Documents';
+    }finally{
+      enable();
+    }
+  };
+
+  loadLocations(); enable();
+</script>
+</body>
+</html>

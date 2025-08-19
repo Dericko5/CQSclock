@@ -18,6 +18,9 @@ const PORT = process.env.PORT || 3000;
 // Initialize database and OneDrive service
 const db = new Database();
 const oneDriveService = new OneDriveService();
+const oneDriveDocsService = new OneDriveService({
+  folderPath: process.env.ONEDRIVE_DOCS_FOLDER_PATH || 'Worker_Documents'
+});
 
 // Env sanity
 const SERVICE_UPN = process.env.ONEDRIVE_SERVICE_UPN;
@@ -95,6 +98,16 @@ const upload = multer({
     else cb(new Error('Invalid file type. Only JPEG, PNG, and JPG files are allowed.'));
   }
 });
+const uploadDocs = multer({
+  storage,
+  limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Invalid file type. Allowed: PDF, JPG, PNG.'));
+  }
+});
+
 
 // Background OneDrive upload helper
 async function uploadToOneDriveAsync(photoPath, email, timeRecordId, photoRecordId) {
@@ -380,6 +393,74 @@ app.get('/api/admin/test-onedrive', async (_req, res) => {
     });
   }
 });
+
+app.get('/documents', (req, res) => {
+  res.sendFile(path.join(__dirname, 'documents.html'));
+});
+app.post('/api/documents/submit',
+  uploadDocs.fields([{ name: 'w9', maxCount: 1 }, { name: 'license', maxCount: 1 }]),
+  async (req, res) => {
+    try {
+      const code     = (req.body.code || '').trim();
+      const location = (req.body.location || '').trim();
+      const firstRaw = (req.body.firstName || '').trim();
+      const lastRaw  = (req.body.lastName  || '').trim();
+
+      if (!code || code !== (process.env.UNIVERSAL_CODE || '').trim()) {
+        return res.status(401).json({ error: 'Invalid access code' });
+      }
+      if (!firstRaw || !lastRaw) return res.status(400).json({ error: 'First & last name required' });
+      if (!location) return res.status(400).json({ error: 'Location required' });
+
+      const w9 = (req.files?.w9 || [])[0];
+      const dl = (req.files?.license || [])[0];
+      if (!w9 || !dl) return res.status(400).json({ error: 'W-9 and Driver’s License are required' });
+      if (w9.mimetype !== 'application/pdf') {
+        return res.status(400).json({ error: 'W-9 must be a PDF' });
+      }
+
+      // Sanitize name segments and create readable base
+      const sanitize = s => (s || '').replace(/[^A-Za-z0-9]/g,'').trim();
+      const first = sanitize(firstRaw);
+      const last  = sanitize(lastRaw);
+      const nameBase = (first + last) || 'Unknown';
+
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+
+      // Build final file names
+      const w9Name = `${nameBase}_W9form_${ts}.pdf`;
+      const dlExt  = (path.extname(dl.originalname || '').toLowerCase() || '.jpg');
+      const dlName = `${nameBase}_DriversLicense_${ts}${dlExt}`;
+
+      // Upload to OneDrive under Worker_Documents/<location>/
+      const [w9Result, dlResult] = await Promise.all([
+        oneDriveDocsService.uploadFile(w9.path, w9Name, location),
+        oneDriveDocsService.uploadFile(dl.path, dlName, location),
+      ]);
+
+      // Cleanup local temp files
+      try { if (w9.path) fs.existsSync(w9.path) && fs.unlinkSync(w9.path); } catch {}
+      try { if (dl.path) fs.existsSync(dl.path) && fs.unlinkSync(dl.path); } catch {}
+
+      return res.json({
+        success: true,
+        location,
+        firstName: firstRaw,
+        lastName: lastRaw,
+        w9: { id: w9Result.oneDriveId, url: w9Result.oneDriveUrl, name: w9Name },
+        license: { id: dlResult.oneDriveId, url: dlResult.oneDriveUrl, name: dlName }
+      });
+    } catch (err) {
+      console.error('Documents submit error:', err?.response?.data || err.message);
+      // best effort cleanup
+      try { (req.files?.w9 || []).forEach(f => fs.existsSync(f.path) && fs.unlinkSync(f.path)); } catch {}
+      try { (req.files?.license || []).forEach(f => fs.existsSync(f.path) && fs.unlinkSync(f.path)); } catch {}
+      return res.status(500).json({ error: 'Failed to upload documents' });
+    }
+  }
+);
+
+
 
 // Serve index
 app.get('/', (_req, res) => {
