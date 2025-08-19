@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CQS | Documentos del Trabajador</title>
+  <style>
+    /* ===============================
+    Theme tokens
+    =================================*/
+    :root {
+    --bg-start: #0a0a0a;
+    --bg-end:   #1a1a1a;
+
+    --text:  #ffffff;
+    --muted: #9aa0a6;
+    --hint:  #cfd3d7;
+
+    --accent:   #00ff88;
+    --accent-2: #00cc6a;
+
+    --glass:    rgba(255,255,255,.08);
+    --glass-br: rgba(255,255,255,.15);
+    --glass-hr: rgba(255,255,255,.20);
+
+    --shadow-strong: rgba(0,255,136,.30);
+    --shadow-soft:   rgba(255,255,255,.08);
+    }
+
+    /* ===============================
+    Reset / Base
+    =================================*/
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+    min-height: 100vh;
+    display: flex;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, var(--bg-start), var(--bg-end));
+    }
+
+    /* ===============================
+    Layout / Typography
+    =================================*/
+    .container {
+    width: 100%;
+    max-width: 480px;
+    margin: auto;
+    padding: 24px;
+    }
+
+    .logo {
+    text-align: center;
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(0,255,136,.3);
+    }
+
+    .subtitle {
+    margin: 6px 0 20px;
+    text-align: center;
+    color: var(--muted);
+    }
+
+    .card {
+    margin-bottom: 16px;
+    padding: 18px;
+    border-radius: 16px;
+    border: 1px solid var(--glass-br);
+    background: var(--glass);
+    backdrop-filter: blur(10px);
+    }
+
+    .center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    }
+
+    /* ===============================
+    Form elements
+    =================================*/
+    label {
+    display: block;
+    margin: 10px 0 8px;
+    font-size: 14px;
+    color: var(--hint);
+    }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="file"] {
+    width: 100%;
+    margin-bottom: 14px;
+    padding: 14px;
+    border: 1px solid var(--glass-hr);
+    border-radius: 10px;
+    background: rgba(255,255,255,.1);
+    color: var(--text);
+    outline: none;
+    transition: border-color .2s, box-shadow .2s;
+    }
+
+    input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 8px rgba(0,255,136,.2);
+    }
+
+    /* ===============================
+    Buttons
+    =================================*/
+    .btn {
+    display: inline-block;
+    width: 100%;
+    padding: 16px;
+    border: 0;
+    border-radius: 12px;
+    text-align: center;
+    text-decoration: none;
+    font-weight: 700;
+    letter-spacing: .5px;
+    cursor: pointer;
+    transition: transform .15s, box-shadow .15s, opacity .15s;
+    }
+
+    .btn:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+    }
+
+    .btn-primary {
+    color: #000;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 6px 24px var(--shadow-strong);
+    }
+    .btn-primary:not(:disabled):hover { transform: translateY(-1px); }
+
+    .btn-ghost {
+    width: auto;
+    padding: 12px 16px;
+    color: #e5e7eb;
+    border: 1px solid var(--glass-hr);
+    border-radius: 12px;
+    background: var(--glass);
+    }
+    .btn-ghost:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 18px var(--shadow-soft);
+    }
+
+    .btn-link {
+    display: inline-block;
+    padding: 12px 16px;
+    border-radius: 10px;
+    color: #e5e7eb;
+    text-decoration: none;
+    border: 1px solid var(--glass-br);
+    background: linear-gradient(135deg, #1f2937, #111827);
+    box-shadow: 0 4px 18px rgba(0,0,0,.25);
+    transition: transform .15s;
+    }
+    .btn-link:hover { transform: translateY(-1px); }
+
+    /* ===============================
+    Messages / Notes / Nav
+    =================================*/
+    .msg {
+    display: none;
+    margin-bottom: 16px;
+    padding: 12px;
+    border-radius: 10px;
+    font-weight: 600;
+    text-align: center;
+    }
+    .msg.ok  { display: block; color: #000; background: linear-gradient(135deg, #00ff88, #00cc6a); }
+    .msg.err { display: block; color: #fff; background: linear-gradient(135deg, #ff6b6b, #ee5a52); }
+
+    .note {
+    margin-top: -8px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    color: var(--muted);
+    }
+
+    .spacer { height: 10px; }
+
+   .nav-links{margin-top:10px;text-align:center}
+        .btn-link{
+            display:inline-block;padding:12px 16px;border-radius:10px;
+            border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);
+            color:#cfd3d7;text-decoration:none;font-weight:700;letter-spacing:.3px
+        }
+        .btn-link:hover{border-color:#00ff88;box-shadow:0 0 8px rgba(0,255,136,.2);color:#fff}
+
+    /* ===============================
+    Tiny language toggle (top-right)
+    =================================*/
+    .lang-toggle {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 50;
+    }
+
+    .lang-toggle a {
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    color: #cfd3d7;
+    text-decoration: none;
+    border: 1px solid rgba(255,255,255,.2);
+    background: rgba(255,255,255,.08);
+    backdrop-filter: blur(6px);
+    transition: transform .15s;
+    }
+
+    .lang-toggle a:hover { transform: translateY(-1px); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">CQS Documentos</div>
+    <div class="subtitle">Sube un W-9 y una Licencia de Conducir</div>
+
+    <div id="message" class="msg" role="status" aria-live="polite"></div>
+
+    <div class="card">
+      <label>¿Necesitas un W-9 en blanco?</label>
+      <div class="note">Toca para descargar, llenar y luego subir abajo.</div>
+      <div class="center">
+        <a id="w9Download" class="btn-link" href="/w9.pdf" download>⬇️ Descargar W-9 (PDF)</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <label for="code">Código de acceso</label>
+      <input id="code" type="password" autocomplete="one-time-code" placeholder="Ingresa el código" required />
+
+      <label for="firstName">Nombre</label>
+      <input id="firstName" type="text" placeholder="Ingresa tu nombre" required />
+
+      <label for="lastName">Apellido(s)</label>
+      <input id="lastName" type="text" placeholder="Ingresa tu(s) apellido(s)" required />
+
+      <label for="w9">W-9 (solo PDF)</label>
+      <input id="w9" type="file" accept="application/pdf,.pdf" required />
+
+      <label for="license">Licencia de Conducir (Imagen o PDF)</label>
+      <input id="license" type="file" accept="image/*,application/pdf,.pdf" required />
+
+      <button id="submitBtn" class="btn btn-primary" disabled>Enviar documentos</button>
+
+    </div>
+      <div class="nav-links">
+        <a class="btn-link" href="/index-es.html">← Volver al Inicio</a>
+      </div>
+  </div>
+
+  <script>
+    const el=id=>document.getElementById(id);
+    let msgTimer=null;
+
+    function showMsg(t, ok=true){
+      const m=el('message'); m.style.display='block';
+      m.className='msg '+(ok?'ok':'err'); m.textContent=t;
+      if(msgTimer) clearTimeout(msgTimer);
+      msgTimer=setTimeout(()=>m.style.display='none',5000);
+    }
+
+    function enabled(){
+      return (
+        el('code').value.trim() &&
+        el('firstName').value.trim() &&
+        el('lastName').value.trim() &&
+        el('w9').files[0] &&
+        el('license').files[0]
+      );
+    }
+    function updateButtonState(){ el('submitBtn').disabled=!enabled(); }
+
+    (async()=>{
+      try{
+        const head=await fetch('/w9.pdf',{method:'HEAD'});
+        if(!head.ok) throw new Error();
+      }catch{
+        const link=el('w9Download');
+        link.href='https://www.irs.gov/pub/irs-pdf/fw9.pdf';
+        link.removeAttribute('download');
+      }
+    })();
+
+    ['code','firstName','lastName'].forEach(id=>{
+      el(id).addEventListener('input',updateButtonState);
+      el(id).addEventListener('change',updateButtonState);
+    });
+    el('w9').addEventListener('change',updateButtonState);
+    el('license').addEventListener('change',updateButtonState);
+
+    el('submitBtn').onclick=async()=>{
+      const btn=el('submitBtn'); btn.disabled=true; btn.textContent='Subiendo…';
+      try{
+        const w9=el('w9').files[0], dl=el('license').files[0];
+        if(!w9||!dl) throw new Error('Ambos archivos son obligatorios');
+        if(w9.type!=='application/pdf') throw new Error('El W-9 debe estar en PDF');
+
+        const fd=new FormData();
+        fd.append('code', el('code').value.trim());
+        fd.append('firstName', el('firstName').value.trim());
+        fd.append('lastName', el('lastName').value.trim());
+        fd.append('w9', w9, w9.name||'w9.pdf');
+        fd.append('license', dl, dl.name||'license');
+
+        const r=await fetch('/api/documents/submit',{method:'POST',body:fd});
+        const j=await r.json(); if(!r.ok) throw new Error(j.error||'Error al subir');
+        showMsg('✅ Documentos subidos correctamente');
+        el('code').value=''; el('firstName').value=''; el('lastName').value='';
+        el('w9').value=''; el('license').value=''; btn.textContent='Enviar documentos';
+      }catch(e){ console.error(e); showMsg('❌ '+e.message,false); btn.textContent='Enviar documentos'; }
+      finally{ updateButtonState(); }
+    };
+
+    updateButtonState();
+  </script>
+</body>
+<div class="lang-toggle" role="navigation" aria-label="Idioma">
+  <a href="/documents.html" hreflang="en">EN</a>
+</div>
+
+</html>

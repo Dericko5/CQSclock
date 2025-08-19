@@ -1,6 +1,8 @@
 // middleware/onedrive.js - OneDrive integration with shortcut support + target user
 const axios = require('axios');
 const fs = require('fs');
+const path = require('path');
+const mime = require('mime-types');
 
 class OneDriveService {
   constructor(opts = {}) {
@@ -141,45 +143,64 @@ class OneDriveService {
   }
 
   // Upload to base folder + subFolder (we pass location as subFolder)
-  async uploadFile(filePath, fileName, subFolder) {
-    await this.resolveBaseFolderIfNeeded();
-    const token = await this.getAccessToken();
+  // Upload a file to OneDrive under base folder + subfolder (3rd arg)
+async uploadFile(filePath, fileName, subFolder) {
+  await this.resolveBaseFolderIfNeeded();
+  const token = await this.getAccessToken();
 
-    const folderSegment = (subFolder || 'unknown').trim().replace(/[\\/:*?"<>|]/g, '_');
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const uniqueFileName = `${timestamp}_${folderSegment}_${fileName}`;
+  // Keep spaces if you like; just strip illegal path chars
+  const folderSegment = (subFolder || 'unknown').trim().replace(/[\\/:*?"<>|]/g, '_');
 
-    const finalFolder = `${this.folderPath}/${folderSegment}`;
-    await this.ensurePathExists(finalFolder);
+  // ✅ Preserve the real extension and append the timestamp BEFORE it
+  const rawName  = fileName.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
+  const ext      = path.extname(rawName) || '';                 // e.g. ".pdf"
+  const baseName = ext ? rawName.slice(0, -ext.length) : rawName;
 
-    const fileStream = fs.createReadStream(filePath);
-    const fileStats = fs.statSync(filePath);
+  const ts   = new Date().toISOString().replace(/[:.]/g, '-');
+  const rand = Math.random().toString(36).slice(2, 8);
+  const finalName = `${baseName}_${ts}_${rand}${ext}`;          // e.g. MyW9_2025-08-19T19-21-55-123Z_ab12cd.pdf
 
-    const base = this.baseDriveRoot();
-    const uploadUrl = this.rootItemId
-      ? `${base}/items/${this.rootItemId}:/${folderSegment}/${uniqueFileName}:/content`
-      : `${base}/root:/${finalFolder}/${uniqueFileName}:/content`;
+  // Ensure destination folder exists
+  const finalFolder = `${this.folderPath}/${folderSegment}`;
+  await this.ensurePathExists(finalFolder);
 
-    console.log('GRAPH PUT:', uploadUrl);
-    const response = await axios.put(uploadUrl, fileStream, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/octet-stream',
-        'Content-Length': fileStats.size
-      },
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
-    });
-    console.log('GRAPH OK webUrl:', response.data.webUrl);
+  // Read RAW bytes (no encoding)
+  let stats;
+  try { stats = fs.statSync(filePath); }
+  catch { throw new Error(`Local file not found: ${filePath}`); }
+  const buffer = fs.readFileSync(filePath);
 
-    return {
-      oneDriveId: response.data.id,
-      oneDriveUrl: response.data.webUrl,
-      fileName: uniqueFileName,
-      size: response.data.size,
-      uploadedAt: new Date().toISOString()
-    };
-  }
+  // ✅ Send the correct Content-Type based on the final file name
+  const contentType = mime.lookup(finalName) || 'application/octet-stream';
+
+  // Build a path where we URL-encode names but KEEP slashes as separators
+  const relEscaped = [folderSegment, finalName].map(s => encodeURIComponent(s)).join('/');
+
+  const base = this.baseDriveRoot();
+  const uploadUrl = this.rootItemId
+    ? `${base}/items/${this.rootItemId}:/${relEscaped}:/content?@microsoft.graph.conflictBehavior=replace`
+    // For the root-path style, encode each segment separately as well:
+    : `${base}/root:/${encodeURIComponent(this.folderPath)}/${encodeURIComponent(folderSegment)}/${encodeURIComponent(finalName)}:/content?@microsoft.graph.conflictBehavior=replace`;
+
+  const resp = await axios.put(uploadUrl, buffer, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': contentType,           // ✅ correct MIME (e.g., application/pdf)
+      'Content-Length': stats.size
+    },
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity
+  });
+
+  return {
+    oneDriveId: resp.data.id,
+    oneDriveUrl: resp.data.webUrl,
+    fileName: finalName,
+    size: resp.data.size,
+    uploadedAt: new Date().toISOString()
+  };
+}
+
 
   async cleanupLocalFile(filePath) {
     try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}

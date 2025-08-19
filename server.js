@@ -78,33 +78,49 @@ try {
 
 // Multer: disk storage to ./uploads
 const storage = multer.diskStorage({
-  destination: function (_req, _file, cb) {
-    cb(null, uploadDir);
+  destination(req, file, cb) {
+    const destPath = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(destPath)) fs.mkdirSync(destPath, { recursive: true });
+    cb(null, destPath);
   },
-  filename: function (_req, file, cb) {
-    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname || '.jpg');
-    cb(null, `photo-${unique}${ext}`);
+  filename(req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname || '');
+    cb(null, 'photo-' + uniqueSuffix + (ext || '.jpg'));
   }
 });
+
+// NEW: docs storage (separate prefix)
+const docStorage = multer.diskStorage({
+  destination(req, file, cb) {
+    const destPath = path.join(__dirname, 'uploads');
+    if (!fs.existsSync(destPath)) fs.mkdirSync(destPath, { recursive: true });
+    cb(null, destPath);
+  },
+  filename(req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname || '');
+    cb(null, 'doc-' + uniqueSuffix + (ext || ''));
+  }
+});
+
+// For photos (unchanged)
 const upload = multer({
   storage,
   limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const allowed = (process.env.ALLOWED_FILE_TYPES || 'image/jpeg,image/png,image/jpg')
-      .split(',')
-      .map(t => t.trim());
-    if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Invalid file type. Only JPEG, PNG, and JPG files are allowed.'));
+  fileFilter(req, file, cb) {
+    const allowed = (process.env.ALLOWED_FILE_TYPES || 'image/jpeg,image/png,image/jpg').split(',');
+    allowed.includes(file.mimetype) ? cb(null, true) : cb(new Error('Invalid file type.'));
   }
 });
+
+// For documents (PDF + images)
 const uploadDocs = multer({
-  storage,
+  storage: docStorage,
   limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
+  fileFilter(req, file, cb) {
     const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
-    if (allowed.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Invalid file type. Allowed: PDF, JPG, PNG.'));
+    allowed.includes(file.mimetype) ? cb(null, true) : cb(new Error('Invalid file type. Allowed: PDF, JPG, PNG.'));
   }
 });
 
@@ -402,15 +418,15 @@ app.post('/api/documents/submit',
   async (req, res) => {
     try {
       const code     = (req.body.code || '').trim();
-      const location = (req.body.location || '').trim();
       const firstRaw = (req.body.firstName || '').trim();
       const lastRaw  = (req.body.lastName  || '').trim();
 
       if (!code || code !== (process.env.UNIVERSAL_CODE || '').trim()) {
         return res.status(401).json({ error: 'Invalid access code' });
       }
-      if (!firstRaw || !lastRaw) return res.status(400).json({ error: 'First & last name required' });
-      if (!location) return res.status(400).json({ error: 'Location required' });
+      if (!firstRaw || !lastRaw) {
+        return res.status(400).json({ error: 'First & last name required' });
+      }
 
       const w9 = (req.files?.w9 || [])[0];
       const dl = (req.files?.license || [])[0];
@@ -419,32 +435,32 @@ app.post('/api/documents/submit',
         return res.status(400).json({ error: 'W-9 must be a PDF' });
       }
 
-      // Sanitize name segments and create readable base
       const sanitize = s => (s || '').replace(/[^A-Za-z0-9]/g,'').trim();
       const first = sanitize(firstRaw);
       const last  = sanitize(lastRaw);
       const nameBase = (first + last) || 'Unknown';
 
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const ts   = new Date().toISOString().replace(/[:.]/g, '-');
+      const rand = Math.random().toString(36).slice(2, 8); // make sure it's unique
 
-      // Build final file names
-      const w9Name = `${nameBase}_W9form_${ts}.pdf`;
+      const w9Name = `${nameBase}_W9form_${ts}_${rand}.pdf`;
       const dlExt  = (path.extname(dl.originalname || '').toLowerCase() || '.jpg');
-      const dlName = `${nameBase}_DriversLicense_${ts}${dlExt}`;
+      const dlName = `${nameBase}_DriversLicense_${ts}_${rand}${dlExt}`;
 
-      // Upload to OneDrive under Worker_Documents/<location>/
+      // All new-hire docs go here
+      const subFolder = 'New_Hires';
+
       const [w9Result, dlResult] = await Promise.all([
-        oneDriveDocsService.uploadFile(w9.path, w9Name, location),
-        oneDriveDocsService.uploadFile(dl.path, dlName, location),
+        oneDriveDocsService.uploadFile(w9.path, w9Name, subFolder),
+        oneDriveDocsService.uploadFile(dl.path, dlName, subFolder),
       ]);
 
-      // Cleanup local temp files
+      // cleanup local temp files
       try { if (w9.path) fs.existsSync(w9.path) && fs.unlinkSync(w9.path); } catch {}
       try { if (dl.path) fs.existsSync(dl.path) && fs.unlinkSync(dl.path); } catch {}
 
       return res.json({
         success: true,
-        location,
         firstName: firstRaw,
         lastName: lastRaw,
         w9: { id: w9Result.oneDriveId, url: w9Result.oneDriveUrl, name: w9Name },
@@ -452,13 +468,13 @@ app.post('/api/documents/submit',
       });
     } catch (err) {
       console.error('Documents submit error:', err?.response?.data || err.message);
-      // best effort cleanup
       try { (req.files?.w9 || []).forEach(f => fs.existsSync(f.path) && fs.unlinkSync(f.path)); } catch {}
       try { (req.files?.license || []).forEach(f => fs.existsSync(f.path) && fs.unlinkSync(f.path)); } catch {}
       return res.status(500).json({ error: 'Failed to upload documents' });
     }
   }
 );
+
 
 
 
