@@ -446,6 +446,10 @@ app.post('/api/documents/submit',
       const w9Name = `${nameBase}_W9form_${ts}_${rand}.pdf`;
       const dlExt  = (path.extname(dl.originalname || '').toLowerCase() || '.jpg');
       const dlName = `${nameBase}_DriversLicense_${ts}_${rand}${dlExt}`;
+      // --- W-9 file config (override with W9_FILE in .env if you want) ---
+      const W9_FILE     = process.env.W9_FILE || 'w9.PDF';
+      const W9_ABS_PATH = path.join(__dirname, W9_FILE);
+
 
       // All new-hire docs go here
       const subFolder = 'New_Hires';
@@ -481,6 +485,27 @@ app.post('/api/documents/submit',
 // Serve index
 app.get('/', (_req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
+});
+app.get('/download/w9', (req, res, next) => {
+  fs.access(W9_ABS_PATH, fs.constants.R_OK, (err) => {
+    if (err) return res.status(404).send('W-9 file not found');
+    // res.download sets Content-Disposition: attachment; filename="..."
+    res.download(W9_ABS_PATH, path.basename(W9_ABS_PATH), (e) => {
+      if (e) next(e);
+    });
+  });
+});
+
+// Lightweight availability check for your HEAD fetch
+app.head('/download/w9', (req, res) => {
+  fs.access(W9_ABS_PATH, fs.constants.R_OK, (err) => {
+    res.status(err ? 404 : 200).end();
+  });
+});
+
+// Back-compat: if any page still links to /w9.pdf, redirect to the forced-download route
+app.all(['/w9.pdf', '/W9.pdf'], (req, res) => {
+  res.redirect(302, '/download/w9');
 });
 
 // 404
