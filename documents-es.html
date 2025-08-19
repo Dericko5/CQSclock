@@ -280,16 +280,28 @@
     }
     function updateButtonState(){ el('submitBtn').disabled=!enabled(); }
 
-    (async()=>{
-      try{
-        const head=await fetch('/w9.pdf',{method:'HEAD'});
-        if(!head.ok) throw new Error();
-      }catch{
-        const link=el('w9Download');
-        link.href='https://www.irs.gov/pub/irs-pdf/fw9.pdf';
-        link.removeAttribute('download');
-      }
-    })();
+   (async () => {
+    const link = document.getElementById('w9Download');
+    if (!link) return;
+
+    const exists = async (url) => {
+      try {
+        const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+        return r.ok;
+      } catch { return false; }
+    };
+
+    // Prefer the PDF you added to the repo
+    if (await exists('/IRS-Form-W9-2024.pdf')) {
+      link.href = '/IRS-Form-W9-2024.pdf';
+      link.setAttribute('download', 'IRS-Form-W9-2024.pdf'); // keep as download; remove if you want to view
+      return;
+    }
+
+    // Final fallback: IRS site
+    link.href = 'https://www.irs.gov/pub/irs-pdf/fw9.pdf';
+    link.removeAttribute('download'); // open instead of download
+  })();
 
     ['code','firstName','lastName'].forEach(id=>{
       el(id).addEventListener('input',updateButtonState);
