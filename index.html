@@ -201,7 +201,10 @@
       <div class="camera" style="margin-top:8px">
         <div id="preview" class="preview">📷 Choose or capture a photo</div>
         <div class="camera-actions">
+          <!-- choose from files -->
           <input id="file" type="file" accept="image/*" hidden />
+          <!-- native camera app on mobile -->
+          <input id="cameraFile" type="file" accept="image/*" capture="environment" hidden />
           <button id="chooseBtn"  class="btn btn-sec" type="button">📁 Choose Photo</button>
           <button id="captureBtn" class="btn btn-sec" type="button">📸 Use Camera</button>
         </div>
@@ -215,29 +218,23 @@
     // -------------------------------
     // State
     // -------------------------------
-    
-    let photoBlob=null, stream=null, video=null;
-    let msgHideTimer = null; 
+    let photoBlob = null, stream = null, video = null;
+    let msgHideTimer = null;
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
     // -------------------------------
     // Helpers
     // -------------------------------
     const el = (id) => document.getElementById(id);
+
     function showMsg(text, ok = true) {
-        const m = el('message');
-
-        // make sure it's visible even if a previous run set display:none
-        m.style.display = 'block';
-
-        // style + text
-        m.className = 'msg ' + (ok ? 'ok' : 'err');
-        m.textContent = text;
-
-        // reset the auto-hide timer
-        if (msgHideTimer) clearTimeout(msgHideTimer);
-        msgHideTimer = setTimeout(() => { m.style.display = 'none'; }, 5000);
-        }
-
+      const m = el('message');
+      m.style.display = 'block';
+      m.className = 'msg ' + (ok ? 'ok' : 'err');
+      m.textContent = text;
+      if (msgHideTimer) clearTimeout(msgHideTimer);
+      msgHideTimer = setTimeout(() => { m.style.display = 'none'; }, 5000);
+    }
 
     function enableSubmit() {
       el('submitBtn').disabled = !(
@@ -255,38 +252,41 @@
     }
 
     function resetForm() {
-      // stop camera if active
       stopCamera();
-      // clear inputs
       photoBlob = null;
       el('file').value = '';
+      el('cameraFile').value = '';
       el('code').value = '';
       el('location').selectedIndex = 0;
-      // reset UI
       el('preview').textContent = '📷 Choose or capture a photo';
       el('captureBtn').textContent = '📸 Use Camera';
       el('submitBtn').textContent = 'Submit';
       el('submitBtn').disabled = true;
     }
 
-    async function loadLocations() {
-      try {
+    async function loadLocations(){
+      try{
         const r = await fetch('/api/locations');
         const j = await r.json();
         const sel = el('location');
-        (j.locations || []).forEach(name => {
+
+        const names = (j.locations || [])
+          .slice()
+          .sort((a,b)=> a.localeCompare(b,'en',{sensitivity:'base'}));
+
+        names.forEach(name=>{
           const o = document.createElement('option');
-          o.value = name; o.textContent = name;
+          o.value = name;
+          o.textContent = name;
           sel.appendChild(o);
         });
-      } catch (e) {
-        console.error(e);
-      }
+      }catch(e){ console.error(e); }
     }
 
     // -------------------------------
     // Events
     // -------------------------------
+    // choose from files
     el('chooseBtn').onclick = () => el('file').click();
 
     el('file').onchange = (e) => {
@@ -301,9 +301,17 @@
         enableSubmit();
       };
       reader.readAsDataURL(f);
+      e.target.value = ''; // allow selecting same file again
     };
 
+    // use native camera on mobile; fallback to live preview on desktop
     el('captureBtn').onclick = async () => {
+      if (isMobile) {
+        el('cameraFile').click(); // opens native camera app
+        return;
+      }
+
+      // desktop fallback: live preview + capture
       try {
         if (!stream) {
           stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -329,6 +337,23 @@
       }
     };
 
+    // when camera app returns a photo
+    el('cameraFile').addEventListener('change', (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      if (!/^image\//.test(f.type)) { showMsg('Please capture an image', false); return; }
+      if (f.size > 5 * 1024 * 1024) { showMsg('Max 5MB', false); return; }
+
+      photoBlob = f;
+      const reader = new FileReader();
+      reader.onload = () => {
+        el('preview').innerHTML = `<img src="${reader.result}" alt="preview">`;
+        enableSubmit();
+      };
+      reader.readAsDataURL(f);
+
+      e.target.value = ''; // reset so another capture works
+    });
+
     el('code').oninput      = enableSubmit;
     el('location').onchange = enableSubmit;
 
@@ -352,7 +377,6 @@
         console.error(e);
         showMsg('❌ ' + e.message, false);
       } finally {
-        // Always clear everything after an attempt
         resetForm();
       }
     };
