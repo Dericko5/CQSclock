@@ -49,11 +49,10 @@ app.use('/api/', limiter);
 // CORS
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
-    ? ['https://yourdomain.com']
+    ? ['https://cqsclock.onrender.com']            // or your custom domain
     : ['http://localhost:3000', 'http://127.0.0.1:3000'],
-  credentials: true
+  credentials: true,
 }));
-
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
