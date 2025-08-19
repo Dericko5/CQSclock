@@ -1,665 +1,367 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TimeTracker Pro</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CQS | Photo Submit</title>
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
-            color: #ffffff;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow-x: hidden;
-        }
+  <style>
+    /* ===============================
+       Base / Layout
+       =============================== */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
-        .container {
-            max-width: 400px;
-            margin: 0 auto;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-        }
+    body {
+      min-height: 100vh;
+      display: flex;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #fff;
+      background: linear-gradient(135deg, #0a0a0a, #1a1a1a);
+    }
 
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding-top: 20px;
-        }
+    .container {
+      width: 100%;
+      max-width: 440px;
+      margin: auto;
+      padding: 24px;
+    }
 
-        .logo {
-            font-size: 28px;
-            font-weight: 700;
-            color: #00ff88;
-            text-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
-            margin-bottom: 10px;
-        }
+    /* ===============================
+       Header
+       =============================== */
+    .logo {
+      text-align: center;
+      font-size: 28px;
+      font-weight: 800;
+      color: #00ff88;
+      text-shadow: 0 0 20px rgba(0,255,136,.3);
+      margin-bottom: 6px;
+    }
 
-        .subtitle {
-            color: #888;
-            font-size: 14px;
-        }
+    .subtitle {
+      text-align: center;
+      color: #9aa0a6;
+      margin-bottom: 24px;
+      font-size: 14px;
+    }
 
-        .current-time {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            padding: 20px;
-            text-align: center;
-            margin-bottom: 30px;
-            backdrop-filter: blur(10px);
-        }
+    /* ===============================
+       Card / Sections
+       =============================== */
+    .card {
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 16px;
+      padding: 18px;
+      margin-bottom: 16px;
+      backdrop-filter: blur(10px);
+    }
 
-        .time-display {
-            font-size: 32px;
-            font-weight: 600;
-            color: #00ff88;
-            margin-bottom: 5px;
-            font-family: 'Courier New', monospace;
-        }
+    /* ===============================
+       Form controls
+       =============================== */
+    label {
+      display: block;
+      color: #cfd3d7;
+      font-size: 14px;
+      margin: 10px 0 8px;
+    }
 
-        .date-display {
-            font-size: 16px;
-            color: #ccc;
-        }
+    input,
+    select {
+      width: 100%;
+      padding: 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.2);
+      background: rgba(255,255,255,.1);
+      color: #fff;
+      margin-bottom: 14px;
+      outline: none;
+      transition: border-color .2s, box-shadow .2s;
+    }
 
-        .status-card {
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 20px;
-            backdrop-filter: blur(10px);
-        }
+    input:focus,
+    select:focus {
+      border-color: #00ff88;
+      box-shadow: 0 0 8px rgba(0,255,136,.2);
+    }
 
-        .status-text {
-            text-align: center;
-            font-size: 18px;
-            margin-bottom: 10px;
-        }
+    /* Select: dark dropdown + custom arrow */
+    select {
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, #bbb 50%),
+        linear-gradient(135deg, #bbb 50%, transparent 50%),
+        linear-gradient(to right, transparent, transparent);
+      background-position:
+        calc(100% - 20px) calc(50% - 4px),
+        calc(100% - 14px) calc(50% - 4px),
+        calc(100% - 2.2em) 0.6em;
+      background-size: 6px 6px, 6px 6px, 1px 1.4em;
+      background-repeat: no-repeat;
+      padding-right: 2.6em;
+    }
+    select option {
+      background-color: #0f0f0f;
+      color: #fff;
+    }
 
-        .status-clocked-out {
-            color: #ff6b6b;
-        }
+    /* ===============================
+       Camera / Preview
+       =============================== */
+    .camera {
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.05);
+    }
+    .preview {
+      height: 260px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #6b7280;
+    }
+    .preview img,
+    .preview video {
+      width: 100%;
+      height: 260px;
+      object-fit: cover;
+      display: block;
+    }
+    .camera-actions {
+      padding: 12px;
+      text-align: center;
+      display: grid;
+      gap: 8px;
+    }
 
-        .status-clocked-in {
-            color: #00ff88;
-        }
+    /* ===============================
+       Buttons
+       =============================== */
+    .btn {
+      width: 100%;
+      padding: 16px;
+      border: 0;
+      border-radius: 12px;
+      font-weight: 700;
+      letter-spacing: .5px;
+      cursor: pointer;
+      transition: transform .15s, box-shadow .15s, opacity .15s;
+    }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
 
-        .email-input {
-            width: 100%;
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 10px;
-            color: #fff;
-            font-size: 16px;
-            margin-bottom: 20px;
-            backdrop-filter: blur(10px);
-        }
+    .btn-primary {
+      background: linear-gradient(135deg, #00ff88, #00cc6a);
+      color: #000;
+      box-shadow: 0 6px 24px rgba(0,255,136,.3);
+    }
+    .btn-primary:not(:disabled):hover { transform: translateY(-1px); }
 
-        .email-input::placeholder {
-            color: #888;
-        }
+    .btn-sec {
+      background: linear-gradient(135deg, #4a9eff, #0066cc);
+      color: #fff;
+    }
+    .btn-sec:hover { transform: translateY(-1px); }
 
-        .email-input:focus {
-            outline: none;
-            border-color: #00ff88;
-            box-shadow: 0 0 10px rgba(0, 255, 136, 0.2);
-        }
-
-        .action-buttons {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-
-        .btn {
-            padding: 18px;
-            border: none;
-            border-radius: 12px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .btn::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-            transition: left 0.5s;
-        }
-
-        .btn:hover::before {
-            left: 100%;
-        }
-
-        .btn-clock-in {
-            background: linear-gradient(135deg, #00ff88 0%, #00cc6a 100%);
-            color: #000;
-            box-shadow: 0 4px 20px rgba(0, 255, 136, 0.3);
-        }
-
-        .btn-clock-in:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 25px rgba(0, 255, 136, 0.4);
-        }
-
-        .btn-clock-out {
-            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
-            color: #fff;
-            box-shadow: 0 4px 20px rgba(255, 107, 107, 0.3);
-        }
-
-        .btn-clock-out:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 25px rgba(255, 107, 107, 0.4);
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none !important;
-        }
-
-        .camera-section {
-            margin-bottom: 20px;
-        }
-
-        .camera-container {
-            position: relative;
-            border-radius: 15px;
-            overflow: hidden;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .camera-preview {
-            width: 100%;
-            height: 250px;
-            background: #1a1a1a;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #666;
-            font-size: 16px;
-        }
-
-        .camera-controls {
-            padding: 15px;
-            text-align: center;
-        }
-
-        .btn-camera {
-            background: linear-gradient(135deg, #4a9eff 0%, #0066cc 100%);
-            color: #fff;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            margin: 5px;
-        }
-
-        .btn-camera:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 15px rgba(74, 158, 255, 0.3);
-        }
-
-        .footer {
-            margin-top: auto;
-            text-align: center;
-            color: #555;
-            font-size: 12px;
-            padding: 20px 0;
-        }
-
-        .success-message {
-            background: linear-gradient(135deg, #00ff88 0%, #00cc6a 100%);
-            color: #000;
-            padding: 15px;
-            border-radius: 10px;
-            text-align: center;
-            font-weight: 600;
-            margin-bottom: 20px;
-            animation: slideDown 0.3s ease;
-        }
-
-        .error-message {
-            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
-            color: #fff;
-            padding: 15px;
-            border-radius: 10px;
-            text-align: center;
-            font-weight: 600;
-            margin-bottom: 20px;
-            animation: slideDown 0.3s ease;
-        }
-
-        @keyframes slideDown {
-            from {
-                opacity: 0;
-                transform: translateY(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .loading {
-            opacity: 0.7;
-            pointer-events: none;
-        }
-
-        @media (max-width: 480px) {
-            .container {
-                padding: 15px;
-            }
-            
-            .time-display {
-                font-size: 28px;
-            }
-            
-            .logo {
-                font-size: 24px;
-            }
-        }
-    </style>
+    /* ===============================
+       Messages
+       =============================== */
+    .msg {
+      display: none;
+      padding: 12px;
+      margin-bottom: 16px;
+      border-radius: 10px;
+      font-weight: 600;
+      text-align: center;
+    }
+    .msg.ok  { display: block; background: linear-gradient(135deg,#00ff88,#00cc6a); color:#000; }
+    .msg.err { display: block; background: linear-gradient(135deg,#ff6b6b,#ee5a52); color:#fff; }
+  </style>
 </head>
+
 <body>
-    <div class="container">
-        <div class="header">
-            <div class="logo">⏰ TimeTracker Pro</div>
-            <div class="subtitle">Employee Time Management</div>
-        </div>
+  <div class="container">
+    <div class="logo">CQS Upload</div>
+    <div class="subtitle">Submit up to 5 photos per day per location</div>
 
-        <div class="current-time">
-            <div class="time-display" id="currentTime">12:00:00 PM</div>
-            <div class="date-display" id="currentDate">Monday, January 1, 2024</div>
-        </div>
+    <div id="message" class="msg"></div>
 
-        <div class="status-card">
-            <div class="status-text" id="statusText">
-                Status: <span class="status-clocked-out">Clocked Out</span>
-            </div>
-        </div>
+    <div class="card">
+      <label for="code">Access Code</label>
+      <input id="code" type="password" placeholder="Enter code" autocomplete="one-time-code" required />
 
-        <input type="email" class="email-input" id="emailInput" placeholder="Enter your work email..." required>
+      <label for="location">Location</label>
+      <select id="location" required>
+        <option value="">Select a location…</option>
+      </select>
 
-        <div class="camera-section">
-            <div class="camera-container">
-                <div class="camera-preview" id="cameraPreview">
-                    📷 Camera preview will appear here
-                </div>
-                <div class="camera-controls">
-                    <button class="btn-camera" id="cameraBtn">
-                        📸 Take Photo (Required)
-                    </button>
-                    <div style="margin: 10px 0; color: #666; font-size: 14px;">OR</div>
-                    <input type="file" id="fileInput" accept="image/*" style="display: none;">
-                    <button class="btn-camera" id="uploadBtn">
-                        📁 Upload from Computer
-                    </button>
-                </div>
-            </div>
+      <div class="camera" style="margin-top:8px">
+        <div id="preview" class="preview">📷 Choose or capture a photo</div>
+        <div class="camera-actions">
+          <input id="file" type="file" accept="image/*" hidden />
+          <button id="chooseBtn"  class="btn btn-sec" type="button">📁 Choose Photo</button>
+          <button id="captureBtn" class="btn btn-sec" type="button">📸 Use Camera</button>
         </div>
+      </div>
 
-        <div class="action-buttons">
-            <button class="btn btn-clock-in" id="clockInBtn" disabled>
-                🟢 Clock In
-            </button>
-            <button class="btn btn-clock-out" id="clockOutBtn" disabled>
-                🔴 Clock Out
-            </button>
-        </div>
-
-        <div class="footer">
-            © 2024 TimeTracker Pro - Secure Employee Time Management
-        </div>
+      <button id="submitBtn" class="btn btn-primary" style="margin-top:12px" disabled>Submit</button>
     </div>
+  </div>
 
-    <script>
-        let isLoggedIn = false;
-        let userEmail = '';
-        let photoTaken = false;
-        let capturedPhoto = null;
-        let cameraStream = null;
-        let video = null;
+  <script>
+    // -------------------------------
+    // State
+    // -------------------------------
+    
+    let photoBlob=null, stream=null, video=null;
+    let msgHideTimer = null; 
 
-        // Initialize everything when DOM is loaded
-        document.addEventListener('DOMContentLoaded', function() {
-            // Add event listeners to buttons (CSP-friendly)
-            document.getElementById('cameraBtn').addEventListener('click', toggleCamera);
-            document.getElementById('uploadBtn').addEventListener('click', function() {
-                document.getElementById('fileInput').click();
-            });
-            document.getElementById('fileInput').addEventListener('change', handleFileUpload);
-            document.getElementById('clockInBtn').addEventListener('click', clockIn);
-            document.getElementById('clockOutBtn').addEventListener('click', clockOut);
-            
-            // Initialize other functionality
-            checkInitialStatus();
-            validateForm();
+    // -------------------------------
+    // Helpers
+    // -------------------------------
+    const el = (id) => document.getElementById(id);
+    function showMsg(text, ok = true) {
+        const m = el('message');
+
+        // make sure it's visible even if a previous run set display:none
+        m.style.display = 'block';
+
+        // style + text
+        m.className = 'msg ' + (ok ? 'ok' : 'err');
+        m.textContent = text;
+
+        // reset the auto-hide timer
+        if (msgHideTimer) clearTimeout(msgHideTimer);
+        msgHideTimer = setTimeout(() => { m.style.display = 'none'; }, 5000);
+        }
+
+
+    function enableSubmit() {
+      el('submitBtn').disabled = !(
+        el('code').value.trim().length > 0 &&
+        el('location').value &&
+        photoBlob
+      );
+    }
+
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = null;
+      }
+    }
+
+    function resetForm() {
+      // stop camera if active
+      stopCamera();
+      // clear inputs
+      photoBlob = null;
+      el('file').value = '';
+      el('code').value = '';
+      el('location').selectedIndex = 0;
+      // reset UI
+      el('preview').textContent = '📷 Choose or capture a photo';
+      el('captureBtn').textContent = '📸 Use Camera';
+      el('submitBtn').textContent = 'Submit';
+      el('submitBtn').disabled = true;
+    }
+
+    async function loadLocations() {
+      try {
+        const r = await fetch('/api/locations');
+        const j = await r.json();
+        const sel = el('location');
+        (j.locations || []).forEach(name => {
+          const o = document.createElement('option');
+          o.value = name; o.textContent = name;
+          sel.appendChild(o);
         });
+      } catch (e) {
+        console.error(e);
+      }
+    }
 
-        // Check user status on page load
-        window.addEventListener('load', async () => {
-            await checkInitialStatus();
-        });
+    // -------------------------------
+    // Events
+    // -------------------------------
+    el('chooseBtn').onclick = () => el('file').click();
 
-        // Update time display
-        function updateTime() {
-            const now = new Date();
-            const timeString = now.toLocaleTimeString('en-US', {
-                hour12: true,
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            });
-            const dateString = now.toLocaleDateString('en-US', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-            });
+    el('file').onchange = (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      if (!/^image\//.test(f.type)) { showMsg('Please select an image', false); return; }
+      if (f.size > 5 * 1024 * 1024) { showMsg('Max 5MB', false); return; }
+      photoBlob = f;
 
-            document.getElementById('currentTime').textContent = timeString;
-            document.getElementById('currentDate').textContent = dateString;
+      const reader = new FileReader();
+      reader.onload = () => {
+        el('preview').innerHTML = `<img src="${reader.result}" alt="preview">`;
+        enableSubmit();
+      };
+      reader.readAsDataURL(f);
+    };
+
+    el('captureBtn').onclick = async () => {
+      try {
+        if (!stream) {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          video = document.createElement('video');
+          video.autoplay = true;
+          video.srcObject = stream;
+          el('preview').innerHTML = '';
+          el('preview').appendChild(video);
+          el('captureBtn').textContent = '📸 Capture';
+        } else {
+          const c = document.createElement('canvas');
+          c.width = video.videoWidth; c.height = video.videoHeight;
+          c.getContext('2d').drawImage(video, 0, 0);
+          photoBlob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
+          stopCamera();
+          el('preview').innerHTML = `<img src="${c.toDataURL()}" alt="captured">`;
+          el('captureBtn').textContent = '📸 Use Camera';
+          enableSubmit();
         }
+      } catch (e) {
+        console.error(e);
+        showMsg('Camera not available', false);
+      }
+    };
 
-        // Initialize time updates
-        setInterval(updateTime, 1000);
-        updateTime();
+    el('code').oninput      = enableSubmit;
+    el('location').onchange = enableSubmit;
 
-        // Email input validation
-        document.getElementById('emailInput').addEventListener('input', function(e) {
-            userEmail = e.target.value;
-            validateForm();
-            
-            // Check status when email is entered
-            if (userEmail && userEmail.includes('@')) {
-                checkUserStatus(userEmail);
-            }
-        });
+    el('submitBtn').onclick = async () => {
+      const btn = el('submitBtn');
+      btn.disabled = true;
+      btn.textContent = 'Uploading…';
 
-        function validateForm() {
-            const isValidEmail = userEmail && userEmail.includes('@') && userEmail.includes('.');
-            const clockInBtn = document.getElementById('clockInBtn');
-            const clockOutBtn = document.getElementById('clockOutBtn');
-            
-            if (isValidEmail) {
-                if (isLoggedIn) {
-                    clockInBtn.disabled = true;
-                    clockOutBtn.disabled = false;
-                } else {
-                    clockInBtn.disabled = !photoTaken;
-                    clockOutBtn.disabled = true;
-                }
-            } else {
-                clockInBtn.disabled = true;
-                clockOutBtn.disabled = true;
-            }
-        }
+      try {
+        const fd = new FormData();
+        fd.append('code',     el('code').value.trim());
+        fd.append('location', el('location').value);
+        fd.append('photo',    photoBlob, 'photo.jpg');
 
-        // Check initial user status
-        async function checkInitialStatus() {
-            // Note: In production, you can use localStorage.getItem('lastEmail')
-            // For now, users need to enter email each time
-            console.log('Page loaded - ready for user input');
-        }
+        const r = await fetch('/api/submit', { method: 'POST', body: fd });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || 'Submit failed');
 
-        // Check if user is currently clocked in
-        async function checkUserStatus(email) {
-            try {
-                const response = await fetch(`/api/status/${encodeURIComponent(email)}`);
-                const data = await response.json();
-                
-                if (data.isLoggedIn) {
-                    isLoggedIn = true;
-                    document.getElementById('statusText').innerHTML = 
-                        'Status: <span class="status-clocked-in">Clocked In</span>';
-                } else {
-                    isLoggedIn = false;
-                    document.getElementById('statusText').innerHTML = 
-                        'Status: <span class="status-clocked-out">Clocked Out</span>';
-                }
-                
-                validateForm();
-            } catch (error) {
-                console.error('Status check error:', error);
-            }
-        }
+        showMsg('✅ Uploaded successfully', true);
+      } catch (e) {
+        console.error(e);
+        showMsg('❌ ' + e.message, false);
+      } finally {
+        // Always clear everything after an attempt
+        resetForm();
+      }
+    };
 
-        // Handle file upload from computer
-        function handleFileUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            
-            // Validate file type
-            if (!file.type.startsWith('image/')) {
-                showMessage('❌ Please select an image file', 'error');
-                return;
-            }
-            
-            // Validate file size (5MB limit)
-            if (file.size > 5 * 1024 * 1024) {
-                showMessage('❌ Image too large. Please select a file under 5MB', 'error');
-                return;
-            }
-            
-            // Store the file
-            capturedPhoto = file;
-            
-            // Display preview
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const cameraPreview = document.getElementById('cameraPreview');
-                const img = document.createElement('img');
-                img.src = e.target.result;
-                img.style.width = '100%';
-                img.style.height = '250px';
-                img.style.objectFit = 'cover';
-                
-                cameraPreview.innerHTML = '';
-                cameraPreview.appendChild(img);
-                
-                // Update button text
-                document.getElementById('cameraBtn').textContent = '✅ Image Selected - Take New Photo?';
-                
-                photoTaken = true;
-                validateForm();
-                
-                showMessage('✅ Image uploaded successfully!', 'success');
-            };
-            reader.readAsDataURL(file);
-        }
-
-        // Camera functions
-        async function toggleCamera() {
-            const cameraBtn = document.getElementById('cameraBtn');
-            const cameraPreview = document.getElementById('cameraPreview');
-
-            try {
-                if (!cameraStream) {
-                    // Start camera
-                    cameraStream = await navigator.mediaDevices.getUserMedia({ 
-                        video: { 
-                            facingMode: 'user',
-                            width: { ideal: 640 },
-                            height: { ideal: 480 }
-                        } 
-                    });
-                    
-                    video = document.createElement('video');
-                    video.srcObject = cameraStream;
-                    video.autoplay = true;
-                    video.style.width = '100%';
-                    video.style.height = '250px';
-                    video.style.objectFit = 'cover';
-                    
-                    cameraPreview.innerHTML = '';
-                    cameraPreview.appendChild(video);
-                    
-                    cameraBtn.textContent = '📸 Capture Photo';
-                } else {
-                    // Take photo
-                    const canvas = document.createElement('canvas');
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(video, 0, 0);
-                    
-                    // Store captured photo as blob
-                    canvas.toBlob((blob) => {
-                        capturedPhoto = blob;
-                    }, 'image/jpeg', 0.8);
-                    
-                    // Stop camera
-                    cameraStream.getTracks().forEach(track => track.stop());
-                    cameraStream = null;
-                    
-                    // Show captured image
-                    const img = document.createElement('img');
-                    img.src = canvas.toDataURL();
-                    img.style.width = '100%';
-                    img.style.height = '250px';
-                    img.style.objectFit = 'cover';
-                    
-                    cameraPreview.innerHTML = '';
-                    cameraPreview.appendChild(img);
-                    
-                    cameraBtn.textContent = '✅ Photo Captured - Retake?';
-                    photoTaken = true;
-                    validateForm();
-                }
-            } catch (error) {
-                showMessage('Camera access denied or not available', 'error');
-                console.error('Camera error:', error);
-            }
-        }
-
-        // Clock In function with API call
-        async function clockIn() {
-            if (!userEmail || !photoTaken || !capturedPhoto) return;
-            
-            const clockInBtn = document.getElementById('clockInBtn');
-            clockInBtn.classList.add('loading');
-            clockInBtn.textContent = '⏳ Clocking In...';
-            
-            try {
-                // Create FormData for file upload
-                const formData = new FormData();
-                formData.append('email', userEmail);
-                formData.append('photo', capturedPhoto, 'clock-in-photo.jpg');
-                
-                const response = await fetch('/api/clock-in', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    showMessage('✅ Successfully clocked in!', 'success');
-                    isLoggedIn = true;
-                    document.getElementById('statusText').innerHTML = 
-                        'Status: <span class="status-clocked-in">Clocked In</span>';
-                    
-                    // Note: In production, you can store email with localStorage.setItem('lastEmail', userEmail)
-                    // For now, status is checked when user enters email
-                    
-                    validateForm();
-                } else {
-                    showMessage(`❌ Clock in failed: ${data.error}`, 'error');
-                }
-            } catch (error) {
-                console.error('Clock in error:', error);
-                showMessage('❌ Clock in failed. Please try again.', 'error');
-            } finally {
-                clockInBtn.classList.remove('loading');
-                clockInBtn.textContent = '🟢 Clock In';
-            }
-        }
-
-        // Clock Out function with API call
-        async function clockOut() {
-            if (!isLoggedIn || !userEmail) return;
-            
-            const clockOutBtn = document.getElementById('clockOutBtn');
-            clockOutBtn.classList.add('loading');
-            clockOutBtn.textContent = '⏳ Clocking Out...';
-            
-            try {
-                const response = await fetch('/api/clock-out', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ email: userEmail })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    showMessage(`✅ Successfully clocked out! Total time: ${data.data.totalHours} hours`, 'success');
-                    isLoggedIn = false;
-                    document.getElementById('statusText').innerHTML = 
-                        'Status: <span class="status-clocked-out">Clocked Out</span>';
-                    
-                    // Reset form
-                    document.getElementById('emailInput').value = '';
-                    userEmail = '';
-                    photoTaken = false;
-                    capturedPhoto = null;
-                    document.getElementById('cameraPreview').innerHTML = '📷 Camera preview will appear here';
-                    document.getElementById('cameraBtn').textContent = '📸 Take Photo (Required)';
-                    
-                    validateForm();
-                } else {
-                    showMessage(`❌ Clock out failed: ${data.error}`, 'error');
-                }
-            } catch (error) {
-                console.error('Clock out error:', error);
-                showMessage('❌ Clock out failed. Please try again.', 'error');
-            } finally {
-                clockOutBtn.classList.remove('loading');
-                clockOutBtn.textContent = '🔴 Clock Out';
-            }
-        }
-
-        function showMessage(message, type = 'success') {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = type === 'success' ? 'success-message' : 'error-message';
-            messageDiv.textContent = message;
-            
-            const container = document.querySelector('.container');
-            container.insertBefore(messageDiv, container.querySelector('.status-card'));
-            
-            setTimeout(() => {
-                messageDiv.remove();
-            }, 5000);
-        }
-    </script>
+    // -------------------------------
+    // Init
+    // -------------------------------
+    loadLocations();
+    enableSubmit();
+  </script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-// middleware/onedrive.js - OneDrive integration (app-only, no /me)
+// middleware/onedrive.js - OneDrive integration with shortcut support + target user
 const axios = require('axios');
 const fs = require('fs');
 
@@ -7,22 +7,33 @@ class OneDriveService {
     this.clientId = process.env.AZURE_CLIENT_ID;
     this.clientSecret = process.env.AZURE_CLIENT_SECRET;
     this.tenantId = process.env.AZURE_TENANT_ID;
+
+    // Base folder (in the TARGET user's drive)
     this.folderPath = process.env.ONEDRIVE_FOLDER_PATH || 'TimeClock_Photos';
-    this.serviceUpn = process.env.ONEDRIVE_SERVICE_UPN; // e.g., uploader@yourtenant.com
+
+    // App runs as this account (for audit only; token is app-only)
+    this.serviceUpn = process.env.ONEDRIVE_SERVICE_UPN;
+
+    // NEW: the user whose OneDrive we actually write into (Angelica)
+    this.targetUpn  = process.env.ONEDRIVE_TARGET_UPN || this.serviceUpn;
+
+    // Optional: pin directly to a specific drive/folder (rock-solid)
+    this.driveId    = process.env.ONEDRIVE_DRIVE_ID || null;
+    this.rootItemId = process.env.ONEDRIVE_ROOT_ITEM_ID || null;
+
     this.accessToken = null;
     this.tokenExpiry = null;
   }
 
+  // Use pinned drive if provided; otherwise use the TARGET user's drive (Angelica)
   baseDriveRoot() {
-    // All endpoints go under the service account's drive
-    return `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(this.serviceUpn)}/drive`;
+    return this.driveId
+      ? `https://graph.microsoft.com/v1.0/drives/${this.driveId}`
+      : `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(this.targetUpn)}/drive`;
   }
 
-  // Get access token using client credentials flow
   async getAccessToken() {
-    if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
-      return this.accessToken;
-    }
+    if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) return this.accessToken;
 
     const tokenUrl = `https://login.microsoftonline.com/${this.tenantId}/oauth2/v2.0/token`;
     const params = new URLSearchParams();
@@ -31,56 +42,99 @@ class OneDriveService {
     params.append('scope', 'https://graph.microsoft.com/.default');
     params.append('grant_type', 'client_credentials');
 
-    const response = await axios.post(tokenUrl, params, {
+    const resp = await axios.post(tokenUrl, params, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
-
-    this.accessToken = response.data.access_token;
-    this.tokenExpiry = Date.now() + (response.data.expires_in - 300) * 1000; // minus 5 min
+    this.accessToken = resp.data.access_token;
+    this.tokenExpiry = Date.now() + (resp.data.expires_in - 300) * 1000;
     return this.accessToken;
   }
 
-  // Ensure a given path exists under the service account's OneDrive
-  async ensurePathExists(targetPath) {
+  // Resolve whether folderPath is a real folder or a shortcut; pin driveId/rootItemId
+  async resolveBaseFolderIfNeeded() {
+    if (this.rootItemId) return; // already pinned
     const token = await this.getAccessToken();
-    const rootBase = this.baseDriveRoot();
+    const root = this.baseDriveRoot();
 
-    // First, try to GET the whole path
-    const url = `${rootBase}/root:/${targetPath}`;
     try {
-      await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
-      return; // exists
+      const url = `${root}/root:/${this.folderPath}`;
+      const { data } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+
+      if (data.remoteItem?.id && data.remoteItem?.parentReference?.driveId) {
+        // It's a shortcut; switch to the real drive + item
+        this.driveId = data.remoteItem.parentReference.driveId;
+        this.rootItemId = data.remoteItem.id;
+        console.log(`🔗 Resolved shortcut → driveId=${this.driveId}, itemId=${this.rootItemId}`);
+      } else {
+        // Real folder in the target user's drive
+        this.driveId = this.driveId || data.parentReference?.driveId || null;
+        this.rootItemId = data.id;
+        console.log(`📁 Using folder in target drive → itemId=${this.rootItemId}`);
+      }
+    } catch (e) {
+      console.error('resolveBaseFolderIfNeeded error:', e?.response?.status, e?.response?.data || e.message);
+      throw e;
+    }
+  }
+
+  // Ensure a path exists beneath the base folder
+  async ensurePathExists(targetPath) {
+    await this.resolveBaseFolderIfNeeded();
+    const token = await this.getAccessToken();
+    const root = this.baseDriveRoot();
+
+    const relativePath = this.rootItemId
+      ? targetPath.replace(new RegExp(`^${this.folderPath}/?`, 'i'), '')
+      : targetPath;
+
+    if (this.rootItemId) {
+      const segments = relativePath.split('/').filter(Boolean);
+      let currentId = this.rootItemId;
+
+      for (const seg of segments) {
+        try {
+          const child = await axios.get(
+            `${root}/items/${currentId}:/${encodeURIComponent(seg)}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          currentId = child.data.id;
+        } catch (err) {
+          if (err.response?.status === 404) {
+            const created = await axios.post(
+              `${root}/items/${currentId}/children`,
+              { name: seg, folder: {}, '@microsoft.graph.conflictBehavior': 'replace' },
+              { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
+            );
+            currentId = created.data.id;
+          } else {
+            throw err;
+          }
+        }
+      }
+      return;
+    }
+
+    // Fallback: absolute create from drive root
+    try {
+      await axios.get(`${root}/root:/${targetPath}`, { headers: { Authorization: `Bearer ${token}` } });
+      return;
     } catch (err) {
       if (err.response?.status !== 404) throw err;
     }
 
-    // Create each segment step-by-step
     const parts = targetPath.split('/').filter(Boolean);
-    let current = '';
-
+    let currentPath = '';
     for (const part of parts) {
-      const parent = current;
-      current = current ? `${current}/${part}` : part;
+      const parent = currentPath;
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
 
       try {
-        await axios.get(`${rootBase}/root:/${current}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        await axios.get(`${root}/root:/${currentPath}`, { headers: { Authorization: `Bearer ${token}` } });
       } catch (err) {
         if (err.response?.status === 404) {
-          const createUrl = parent
-            ? `${rootBase}/root:/${parent}:/children`
-            : `${rootBase}/root/children`;
-
-          await axios.post(createUrl, {
-            name: part,
-            folder: {},
-            '@microsoft.graph.conflictBehavior': 'rename'
-          }, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
+          const createUrl = parent ? `${root}/root:/${parent}:/children` : `${root}/root/children`;
+          await axios.post(createUrl, { name: part, folder: {}, '@microsoft.graph.conflictBehavior': 'replace' }, {
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
           });
         } else {
           throw err;
@@ -89,23 +143,27 @@ class OneDriveService {
     }
   }
 
-  // Upload a file to OneDrive (≤ ~5 MB based on your MAX_FILE_SIZE)
-  async uploadFile(filePath, fileName, userEmail) {
+  // Upload to base folder + subFolder (we pass location as subFolder)
+  async uploadFile(filePath, fileName, subFolder) {
+    await this.resolveBaseFolderIfNeeded();
     const token = await this.getAccessToken();
 
+    const folderSegment = (subFolder || 'unknown').trim().replace(/[\\/:*?"<>|]/g, '_');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const sanitizedEmail = (userEmail || 'unknown').replace(/[^a-zA-Z0-9._@-]/g, '_');
-    const uniqueFileName = `${timestamp}_${sanitizedEmail}_${fileName}`;
+    const uniqueFileName = `${timestamp}_${folderSegment}_${fileName}`;
 
-    // Put each user's photos inside a subfolder named by their email
-    const finalFolder = `${this.folderPath}/${sanitizedEmail}`;
+    const finalFolder = `${this.folderPath}/${folderSegment}`;
     await this.ensurePathExists(finalFolder);
 
     const fileStream = fs.createReadStream(filePath);
     const fileStats = fs.statSync(filePath);
 
-    const uploadUrl = `${this.baseDriveRoot()}/root:/${finalFolder}/${uniqueFileName}:/content`;
+    const base = this.baseDriveRoot();
+    const uploadUrl = this.rootItemId
+      ? `${base}/items/${this.rootItemId}:/${folderSegment}/${uniqueFileName}:/content`
+      : `${base}/root:/${finalFolder}/${uniqueFileName}:/content`;
 
+    console.log('GRAPH PUT:', uploadUrl);
     const response = await axios.put(uploadUrl, fileStream, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -115,6 +173,7 @@ class OneDriveService {
       maxContentLength: Infinity,
       maxBodyLength: Infinity
     });
+    console.log('GRAPH OK webUrl:', response.data.webUrl);
 
     return {
       oneDriveId: response.data.id,
@@ -126,21 +185,27 @@ class OneDriveService {
   }
 
   async cleanupLocalFile(filePath) {
-    try {
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    } catch {}
+    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
   }
 
   async getFileDownloadUrl(oneDriveId) {
+    await this.resolveBaseFolderIfNeeded();
     const token = await this.getAccessToken();
-    const url = `${this.baseDriveRoot()}/items/${oneDriveId}`;
+    const base = this.baseDriveRoot();
+    const url = `${base}/items/${oneDriveId}`;
     const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
     return res.data['@microsoft.graph.downloadUrl'];
   }
 
   async listFiles() {
+    await this.resolveBaseFolderIfNeeded();
     const token = await this.getAccessToken();
-    const url = `${this.baseDriveRoot()}/root:/${this.folderPath}:/children`;
+    const base = this.baseDriveRoot();
+
+    const url = this.rootItemId
+      ? `${base}/items/${this.rootItemId}/children`
+      : `${base}/root:/${this.folderPath}:/children`;
+
     const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
     return res.data.value.map(f => ({
       id: f.id,

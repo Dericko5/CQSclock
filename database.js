@@ -78,7 +78,54 @@ class Database {
 
             console.log('✅ Database tables initialized successfully');
         });
+        this.db.run(`
+            CREATE TABLE IF NOT EXISTS location_uploads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                location TEXT NOT NULL,
+                original_filename TEXT,
+                stored_filename TEXT,
+                onedrive_url TEXT,
+                file_size INTEGER,
+                submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            `);
     }
+    async recordLocationUpload(code, location, original, stored, size, onedriveUrl=null) {
+        return new Promise((resolve, reject) => {
+            this.db.run(`
+            INSERT INTO location_uploads (code, location, original_filename, stored_filename, file_size, onedrive_url)
+            VALUES (?, ?, ?, ?, ?, ?)
+            `, [code, location, original, stored, size, onedriveUrl], function(err) {
+            if (err) reject(err);
+            else resolve({ id: this.lastID });
+            });
+        });
+    }
+
+    async setLocationUploadUrl(id, url) {
+        return new Promise((resolve, reject) => {
+            this.db.run(`UPDATE location_uploads SET onedrive_url = ? WHERE id = ?`,
+            [url, id], function(err) {
+                if (err) reject(err); else resolve(true);
+            });
+        });
+    }
+
+    async countLocationUploadsToday(code, location) {
+        return new Promise((resolve, reject) => {
+            this.db.get(`
+            SELECT COUNT(*) AS cnt
+            FROM location_uploads
+            WHERE code = ?
+                AND location = ?
+                AND DATE(submitted_at, 'localtime') = DATE('now', 'localtime')
+            `, [code, location], (err, row) => {
+            if (err) reject(err); else resolve(row?.cnt || 0);
+            });
+        });
+    }
+
 
     // User management methods
     async createUser(email, firstName = null, lastName = null, employeeId = null, department = null) {

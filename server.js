@@ -148,6 +148,77 @@ app.get('/api/status/:email', async (req, res) => {
     res.status(500).json({ error: 'Failed to check user status' });
   }
 });
+// Load locations
+const locationsConfigPath = path.join(__dirname, 'config', 'locations.json');
+let LOCATIONS = { locations: [] };
+try {
+  LOCATIONS = JSON.parse(fs.readFileSync(locationsConfigPath, 'utf8'));
+} catch {
+  console.warn('⚠️  config/locations.json missing or invalid; the dropdown will be empty.');
+}
+
+const DAILY_UPLOAD_LIMIT = parseInt(process.env.DAILY_UPLOAD_LIMIT || '5', 10);
+const UNIVERSAL_CODE = process.env.UNIVERSAL_CODE || '';
+
+// Locations list for the dropdown
+app.get('/api/locations', (_req, res) => {
+  res.json({ ok: true, locations: LOCATIONS.locations || [] });
+});
+
+// Submit photo to location (code + location + photo)
+app.post('/api/submit', upload.single('photo'), async (req, res) => {
+  try {
+    const code = (req.body.code || '').trim();
+    const location = (req.body.location || '').trim();
+    if (!code || !location) {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Code and location are required' });
+    }
+    if (!UNIVERSAL_CODE || code !== UNIVERSAL_CODE) {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(401).json({ error: 'Invalid code' });
+    }
+    if (!LOCATIONS.locations.includes(location)) {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Unknown location' });
+    }
+    if (!req.file) return res.status(400).json({ error: 'Photo is required' });
+
+    // Enforce daily limit per code+location
+    const todayCount = await db.countLocationUploadsToday(code, location);
+    if (todayCount >= DAILY_UPLOAD_LIMIT) {
+      if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(429).json({ error: `Daily limit reached (${DAILY_UPLOAD_LIMIT}) for ${location}` });
+    }
+
+    // Record locally first
+    const localRec = await db.recordLocationUpload(
+      code, location, req.file.originalname, req.file.filename, req.file.size
+    );
+
+    // Upload to OneDrive under <base>/<location>
+    const info = await oneDriveService.uploadFile(
+      req.file.path,
+      req.file.originalname,
+      location // ← this becomes the subfolder instead of email
+    );
+
+    // Save OneDrive URL and cleanup local
+    await db.setLocationUploadUrl(localRec.id, info.oneDriveUrl);
+    await oneDriveService.cleanupLocalFile(req.file.path);
+
+    res.json({
+      ok: true,
+      location,
+      webUrl: info.oneDriveUrl
+    });
+  } catch (e) {
+    console.error('submit error:', e?.response?.data || e.message);
+    if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    res.status(500).json({ error: 'Submit failed', detail: e.message });
+  }
+});
+
 
 // Clock-in (photo required)
 app.post('/api/clock-in', upload.single('photo'), async (req, res) => {
