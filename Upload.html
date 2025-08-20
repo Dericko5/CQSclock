@@ -197,7 +197,7 @@
 <body>
   <div class="container">
     <div class="logo">CQS Upload</div>
-    <div class="subtitle">Submit up to 5 photos per day per location</div>
+    <div class="subtitle">Submit up to 50 photos per day per location</div>
 
     <div id="message" class="msg"></div>
 
@@ -210,11 +210,14 @@
         <option value="">Select a location…</option>
       </select>
 
+      <label for="jobsite">Jobsite name</label>
+      <input id="jobsite" type="text" placeholder="e.g., ACME" required />
+
       <div class="camera" style="margin-top:8px">
         <div id="preview" class="preview">📷 Choose or capture a photo</div>
         <div class="camera-actions">
           <!-- choose from files -->
-          <input id="file" type="file" accept="image/*" hidden />
+          <input id="file" type="file" accept="image/*" multiple hidden />
           <!-- native camera app on mobile -->
           <input id="cameraFile" type="file" accept="image/*" capture="environment" hidden />
           <button id="chooseBtn"  class="btn btn-sec" type="button">📁 Choose Photo</button>
@@ -238,180 +241,204 @@
         </div>
 
 
-  <script>
-    // -------------------------------
-    // State
-    // -------------------------------
-    let photoBlob = null, stream = null, video = null;
-    let msgHideTimer = null;
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+<script>
+  // ---------- State ----------
+  let selectedFiles = [];         // <-- NEW: multiple files chosen from disk
+  let capturedBlob = null;        // <-- NEW: single photo from camera capture
+  let stream = null, video = null, msgHideTimer = null;
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-    // -------------------------------
-    // Helpers
-    // -------------------------------
-    const el = (id) => document.getElementById(id);
+  // ---------- Helpers ----------
+  const $ = id => document.getElementById(id);
+  const code        = $('code');
+  const locationSel = $('location');
+  const jobsite     = $('jobsite');
+  const submitBtn   = $('submitBtn');
 
-    function showMsg(text, ok = true) {
-      const m = el('message');
-      m.style.display = 'block';
-      m.className = 'msg ' + (ok ? 'ok' : 'err');
-      m.textContent = text;
-      if (msgHideTimer) clearTimeout(msgHideTimer);
-      msgHideTimer = setTimeout(() => { m.style.display = 'none'; }, 5000);
-    }
+  function showMsg(text, ok = true) {
+    const m = $('message');
+    m.style.display = 'block';
+    m.className = 'msg ' + (ok ? 'ok' : 'err');
+    m.textContent = text;
+    clearTimeout(msgHideTimer);
+    msgHideTimer = setTimeout(() => m.style.display = 'none', 5000);
+  }
 
-    function enableSubmit() {
-      el('submitBtn').disabled = !(
-        el('code').value.trim().length > 0 &&
-        el('location').value &&
-        photoBlob
-      );
-    }
+  function enableSubmit(){
+    submitBtn.disabled = !(
+      code.value.trim() &&
+      locationSel.value &&
+      jobsite.value.trim() &&
+      (selectedFiles.length > 0 || capturedBlob)
+    );
+  }
 
-    function stopCamera() {
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
-        stream = null;
-      }
-    }
+  function stopCamera() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  }
 
-    function resetForm() {
-      stopCamera();
-      photoBlob = null;
-      el('file').value = '';
-      el('cameraFile').value = '';
-      el('code').value = '';
-      el('location').selectedIndex = 0;
-      el('preview').textContent = '📷 Choose or capture a photo';
-      el('captureBtn').textContent = '📸 Use Camera';
-      el('submitBtn').textContent = 'Submit';
-      el('submitBtn').disabled = true;
-    }
+  function clearPreview() {
+    $('preview').innerHTML = '📷 Choose or capture a photo';
+  }
 
-     async function loadLocations(){
-        try{
-        // cache-bust so you always get the freshest list
-        const r = await fetch('/api/locations?ts=' + Date.now(), { cache: 'no-store' });
-        const j = await r.json();
-        const sel = el('location');
+  function renderPreview() {
+    const items = [...selectedFiles];
+    if (capturedBlob) items.unshift(capturedBlob);
 
-        const names = (j.locations || [])
-            .slice()
-            .sort((a,b)=> a.localeCompare(b,'en',{sensitivity:'base'}));
+    if (items.length === 0) { clearPreview(); return; }
 
-        names.forEach(name=>{
-            const opt = document.createElement('option');
-            opt.value = name;                 // keep original value
-            opt.textContent = String(name).toUpperCase(); // show ALL CAPS
-            sel.appendChild(opt);
-        });
-        }catch(e){ console.error(e); }
-    }
+    // Show a simple grid of thumbnails
+    const container = document.createElement('div');
+    container.style.display = 'grid';
+    container.style.gridTemplateColumns = 'repeat(3, 1fr)';
+    container.style.gap = '6px';
 
-    // -------------------------------
-    // Events
-    // -------------------------------
-    // choose from files
-    el('chooseBtn').onclick = () => el('file').click();
-
-    el('file').onchange = (e) => {
-      const f = e.target.files[0]; if (!f) return;
-      if (!/^image\//.test(f.type)) { showMsg('Please select an image', false); return; }
-      if (f.size > 5 * 1024 * 1024) { showMsg('Max 5MB', false); return; }
-      photoBlob = f;
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        el('preview').innerHTML = `<img src="${reader.result}" alt="preview">`;
-        enableSubmit();
-      };
-      reader.readAsDataURL(f);
-      e.target.value = ''; // allow selecting same file again
-    };
-
-    // use native camera on mobile; fallback to live preview on desktop
-    el('captureBtn').onclick = async () => {
-      if (isMobile) {
-        el('cameraFile').click(); // opens native camera app
-        return;
-      }
-
-      // desktop fallback: live preview + capture
-      try {
-        if (!stream) {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          video = document.createElement('video');
-          video.autoplay = true;
-          video.srcObject = stream;
-          el('preview').innerHTML = '';
-          el('preview').appendChild(video);
-          el('captureBtn').textContent = '📸 Capture';
-        } else {
-          const c = document.createElement('canvas');
-          c.width = video.videoWidth; c.height = video.videoHeight;
-          c.getContext('2d').drawImage(video, 0, 0);
-          photoBlob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
-          stopCamera();
-          el('preview').innerHTML = `<img src="${c.toDataURL()}" alt="captured">`;
-          el('captureBtn').textContent = '📸 Use Camera';
-          enableSubmit();
-        }
-      } catch (e) {
-        console.error(e);
-        showMsg('Camera not available', false);
-      }
-    };
-
-    // when camera app returns a photo
-    el('cameraFile').addEventListener('change', (e) => {
-      const f = e.target.files[0]; if (!f) return;
-      if (!/^image\//.test(f.type)) { showMsg('Please capture an image', false); return; }
-      if (f.size > 5 * 1024 * 1024) { showMsg('Max 5MB', false); return; }
-
-      photoBlob = f;
-      const reader = new FileReader();
-      reader.onload = () => {
-        el('preview').innerHTML = `<img src="${reader.result}" alt="preview">`;
-        enableSubmit();
-      };
-      reader.readAsDataURL(f);
-
-      e.target.value = ''; // reset so another capture works
+    items.slice(0, 9).forEach((fileOrBlob) => {
+      const url = URL.createObjectURL(fileOrBlob);
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = 'preview';
+      img.style.width = '100%';
+      img.style.height = '80px';
+      img.style.objectFit = 'cover';
+      img.onload = () => URL.revokeObjectURL(url);
+      container.appendChild(img);
     });
 
-    el('code').oninput      = enableSubmit;
-    el('location').onchange = enableSubmit;
+    $('preview').innerHTML = '';
+    $('preview').appendChild(container);
+  }
 
-    el('submitBtn').onclick = async () => {
-      const btn = el('submitBtn');
-      btn.disabled = true;
-      btn.textContent = 'Uploading…';
+  function resetForm() {
+    stopCamera();
+    selectedFiles = [];
+    capturedBlob = null;
+    $('file').value = '';
+    $('cameraFile').value = '';
+    code.value = '';
+    locationSel.selectedIndex = 0;
+    jobsite.value = '';
+    clearPreview();
+    $('captureBtn').textContent = '📸 Use Camera';
+    submitBtn.textContent = 'Submit';
+    submitBtn.disabled = true;
+  }
 
-      try {
-        const fd = new FormData();
-        fd.append('code',     el('code').value.trim());
-        fd.append('location', el('location').value);
-        fd.append('photo',    photoBlob, 'photo.jpg');
+  async function loadLocations(){
+    try{
+      const r = await fetch('/api/locations?ts=' + Date.now(), { cache: 'no-store' });
+      const j = await r.json();
+      const names = (j.locations || []).slice().sort(
+        (a,b)=> a.localeCompare(b,'en',{sensitivity:'base'})
+      );
+      names.forEach(name=>{
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = String(name).toUpperCase();
+        locationSel.appendChild(opt);
+      });
+    }catch(e){
+      console.error(e);
+      showMsg('Could not load locations', false);
+    }
+  }
 
-        const r = await fetch('/api/submit', { method: 'POST', body: fd });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error || 'Submit failed');
+  // ---------- Events ----------
+  // Uppercase jobsite so comparisons are case-insensitive end-to-end
+  jobsite.addEventListener('input', () => { jobsite.value = jobsite.value.toUpperCase(); enableSubmit(); });
 
-        showMsg('✅ Uploaded successfully', true);
-      } catch (e) {
-        console.error(e);
-        showMsg('❌ ' + e.message, false);
-      } finally {
-        resetForm();
-      }
-    };
+  $('chooseBtn').onclick = () => $('file').click();
 
-    // -------------------------------
-    // Init
-    // -------------------------------
-    loadLocations();
+  // IMPORTANT: make sure your <input id="file"> has the 'multiple' attribute in HTML.
+  $('file').onchange = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    const tooBig = files.find(f => f.size > 5 * 1024 * 1024);
+    if (tooBig) { showMsg('Each image must be ≤ 5MB', false); return; }
+
+    const notImage = files.find(f => !/^image\//.test(f.type));
+    if (notImage) { showMsg('Please select image files only', false); return; }
+
+    // Add them to our list
+    selectedFiles.push(...files);
+    // Limit to 10 to match server-side maxCount
+    if (selectedFiles.length > 10) selectedFiles = selectedFiles.slice(0, 10);
+
+    renderPreview();
     enableSubmit();
-  </script>
+
+    // allow selecting the same files again later
+    e.target.value = '';
+  };
+
+  $('captureBtn').onclick = async () => {
+    if (isMobile) { $('cameraFile').click(); return; }
+    try {
+      if (!stream) {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video = document.createElement('video');
+        video.autoplay = true;
+        video.srcObject = stream;
+        $('preview').innerHTML = '';
+        $('preview').appendChild(video);
+        $('captureBtn').textContent = '📸 Capture';
+      } else {
+        const c = document.createElement('canvas');
+        c.width = video.videoWidth; c.height = video.videoHeight;
+        c.getContext('2d').drawImage(video, 0, 0);
+        capturedBlob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
+        stopCamera();
+        $('captureBtn').textContent = '📸 Use Camera';
+        renderPreview();
+        enableSubmit();
+      }
+    } catch (e) { console.error(e); showMsg('Camera not available', false); }
+  };
+
+  $('cameraFile').addEventListener('change', (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    if (!/^image\//.test(f.type)) { showMsg('Please capture an image', false); return; }
+    if (f.size > 5 * 1024 * 1024) { showMsg('Max 5MB', false); return; }
+    capturedBlob = f;
+    renderPreview();
+    enableSubmit();
+    e.target.value = '';
+  });
+
+  code.addEventListener('input', enableSubmit);
+  locationSel.addEventListener('change', enableSubmit);
+
+  submitBtn.onclick = async () => {
+    const btn = submitBtn;
+    btn.disabled = true; btn.textContent = 'Uploading…';
+    try {
+      const fd = new FormData();
+      fd.append('code',     code.value.trim());
+      fd.append('location', locationSel.value);
+      fd.append('jobsite',  jobsite.value.trim());
+
+      // Send ALL files under "photos"
+      selectedFiles.forEach((f, i) => fd.append('photos', f, f.name || `photo-${i+1}.jpg`));
+      if (capturedBlob) fd.append('photos', capturedBlob, 'camera.jpg');
+
+      const r = await fetch('/api/submit', { method: 'POST', body: fd });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Submit failed');
+
+      showMsg(`✅ Uploaded ${j.count ?? (selectedFiles.length + (capturedBlob?1:0))} photo(s)`, true);
+    } catch (e) {
+      console.error(e); showMsg('❌ ' + e.message, false);
+    } finally {
+      resetForm();
+    }
+  };
+
+  // ---------- Init ----------
+  loadLocations();
+  enableSubmit();
+</script>
+
 </body>
 <div class="lang-toggle" role="navigation" aria-label="Language">
   <a href="/upload-es.html" hreflang="es">ES</a>

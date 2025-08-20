@@ -1,45 +1,36 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8"/>
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>CQS | Subir Parte de Horas</title>
+  <title>CQS | Envío de Fotos</title>
+
   <style>
-    /* ===============================
-       Theme tokens
-    =================================*/
-    :root {
-      --bg-start: #0a0a0a;
-      --bg-end:   #1a1a1a;
-
-      --text:  #ffffff;
-      --muted: #9aa0a6;
-      --hint:  #cfd3d7;
-
-      --accent:   #00ff88;
-      --accent-2: #00cc6a;
-
-      --glass:   rgba(255,255,255,.08);
-      --glass-br:rgba(255,255,255,.15);
-      --glass-hr:rgba(255,255,255,.20);
+    .lang-toggle{
+    position:fixed; top:12px; right:12px; z-index:50;
     }
-
+    .lang-toggle a{
+    font-size:12px; padding:6px 10px; border-radius:999px;
+    color:#cfd3d7; text-decoration:none;
+    border:1px solid rgba(255,255,255,.2);
+    background:rgba(255,255,255,.08);
+    backdrop-filter:blur(6px);
+    transition:transform .15s;
+    }
+    .lang-toggle a:hover{ transform:translateY(-1px); }
     /* ===============================
-       Reset / Base
-    =================================*/
+       Base / Layout
+       =============================== */
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       min-height: 100vh;
       display: flex;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      color: var(--text);
-      background: linear-gradient(135deg, var(--bg-start), var(--bg-end));
+      color: #fff;
+      background: linear-gradient(135deg, #0a0a0a, #1a1a1a);
     }
 
-    /* ===============================
-       Layout / Typography
-    =================================*/
     .container {
       width: 100%;
       max-width: 440px;
@@ -47,64 +38,71 @@
       padding: 24px;
     }
 
+    /* ===============================
+       Header
+       =============================== */
     .logo {
-      margin-bottom: 6px;
       text-align: center;
       font-size: 28px;
       font-weight: 800;
-      color: var(--accent);
+      color: #00ff88;
       text-shadow: 0 0 20px rgba(0,255,136,.3);
+      margin-bottom: 6px;
     }
 
     .subtitle {
-      margin-bottom: 24px;
       text-align: center;
+      color: #9aa0a6;
+      margin-bottom: 24px;
       font-size: 14px;
-      color: var(--muted);
     }
 
+    /* ===============================
+       Card / Sections
+       =============================== */
     .card {
-      margin-bottom: 16px;
-      padding: 18px;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.15);
       border-radius: 16px;
-      border: 1px solid var(--glass-br);
-      background: var(--glass);
+      padding: 18px;
+      margin-bottom: 16px;
       backdrop-filter: blur(10px);
     }
 
     /* ===============================
-       Form elements
-    =================================*/
+       Form controls
+       =============================== */
     label {
       display: block;
-      margin: 10px 0 8px;
+      color: #cfd3d7;
       font-size: 14px;
-      color: var(--hint);
+      margin: 10px 0 8px;
     }
 
     input,
     select {
       width: 100%;
-      margin-bottom: 14px;
       padding: 14px;
-      border: 1px solid var(--glass-hr);
       border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.2);
       background: rgba(255,255,255,.1);
-      color: var(--text);
+      color: #fff;
+      margin-bottom: 14px;
       outline: none;
       transition: border-color .2s, box-shadow .2s;
     }
 
     input:focus,
     select:focus {
-      border-color: var(--accent);
+      border-color: #00ff88;
       box-shadow: 0 0 8px rgba(0,255,136,.2);
     }
 
-    /* nicer native select caret */
+    /* Select: dark dropdown + custom arrow */
     select {
       appearance: none;
-      padding-right: 2.6em;
+      -webkit-appearance: none;
+      -moz-appearance: none;
       background-image:
         linear-gradient(45deg, transparent 50%, #bbb 50%),
         linear-gradient(135deg, #bbb 50%, transparent 50%),
@@ -112,11 +110,11 @@
       background-position:
         calc(100% - 20px) calc(50% - 4px),
         calc(100% - 14px) calc(50% - 4px),
-        calc(100% - 2.2em) .6em;
+        calc(100% - 2.2em) 0.6em;
       background-size: 6px 6px, 6px 6px, 1px 1.4em;
       background-repeat: no-repeat;
+      padding-right: 2.6em;
     }
-
     select option {
       background-color: #0f0f0f;
       color: #fff;
@@ -124,15 +122,13 @@
 
     /* ===============================
        Camera / Preview
-    =================================*/
+       =============================== */
     .camera {
-      margin-top: 8px;
-      border: 1px solid rgba(255,255,255,.12);
       border-radius: 14px;
       overflow: hidden;
+      border: 1px solid rgba(255,255,255,.12);
       background: rgba(255,255,255,.05);
     }
-
     .preview {
       height: 260px;
       display: flex;
@@ -140,25 +136,23 @@
       justify-content: center;
       color: #6b7280;
     }
-
     .preview img,
     .preview video {
       width: 100%;
       height: 260px;
-      display: block;
       object-fit: cover;
+      display: block;
     }
-
     .camera-actions {
-      display: grid;
-      gap: 8px;
       padding: 12px;
       text-align: center;
+      display: grid;
+      gap: 8px;
     }
 
     /* ===============================
        Buttons
-    =================================*/
+       =============================== */
     .btn {
       width: 100%;
       padding: 16px;
@@ -169,93 +163,43 @@
       cursor: pointer;
       transition: transform .15s, box-shadow .15s, opacity .15s;
     }
-
-    .btn:disabled {
-      opacity: .55;
-      cursor: not-allowed;
-    }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
 
     .btn-primary {
-      margin-top: 12px;
+      background: linear-gradient(135deg, #00ff88, #00cc6a);
       color: #000;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
       box-shadow: 0 6px 24px rgba(0,255,136,.3);
     }
-
     .btn-primary:not(:disabled):hover { transform: translateY(-1px); }
 
     .btn-sec {
-      color: #fff;
       background: linear-gradient(135deg, #4a9eff, #0066cc);
+      color: #fff;
     }
-
     .btn-sec:hover { transform: translateY(-1px); }
 
     /* ===============================
-       Messages & Nav
-    =================================*/
+       Messages
+       =============================== */
     .msg {
       display: none;
-      margin-bottom: 16px;
       padding: 12px;
+      margin-bottom: 16px;
       border-radius: 10px;
       font-weight: 600;
       text-align: center;
     }
-
-    .msg.ok {
-      display: block;
-      color: #000;
-      background: linear-gradient(135deg, #00ff88, #00cc6a);
-    }
-
-    .msg.err {
-      display: block;
-      color: #fff;
-      background: linear-gradient(135deg, #ff6b6b, #ee5a52);
-    }
-
-    .nav-links{margin-top:10px;text-align:center}
-        .btn-link{
-            display:inline-block;padding:12px 16px;border-radius:10px;
-            border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);
-            color:#cfd3d7;text-decoration:none;font-weight:700;letter-spacing:.3px
-        }
-        .btn-link:hover{border-color:#00ff88;box-shadow:0 0 8px rgba(0,255,136,.2);color:#fff}
-
-    .nav a:hover { transform: translateY(-1px); }
-
-    /* ===============================
-       Tiny language toggle
-    =================================*/
-    .lang-toggle {
-      position: fixed;
-      top: 12px;
-      right: 12px;
-      z-index: 50;
-    }
-
-    .lang-toggle a {
-      font-size: 12px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      color: #cfd3d7;
-      text-decoration: none;
-      border: 1px solid rgba(255,255,255,.2);
-      background: rgba(255,255,255,.08);
-      backdrop-filter: blur(6px);
-      transition: transform .15s;
-    }
-
-    .lang-toggle a:hover { transform: translateY(-1px); }
+    .msg.ok  { display: block; background: linear-gradient(135deg,#00ff88,#00cc6a); color:#000; }
+    .msg.err { display: block; background: linear-gradient(135deg,#ff6b6b,#ee5a52); color:#fff; }
   </style>
 </head>
+
 <body>
   <div class="container">
-    <div class="logo">CQS Subida</div>
-    <div class="subtitle">Envía hasta 5 fotos por día por ubicación</div>
+    <div class="logo">CQS Upload</div>
+    <div class="subtitle">Envía hasta 50 fotos por día por ubicación</div>
 
-    <div id="message" class="msg" role="status" aria-live="polite"></div>
+    <div id="message" class="msg"></div>
 
     <div class="card">
       <label for="code">Código de acceso</label>
@@ -266,10 +210,15 @@
         <option value="">Selecciona una ubicación…</option>
       </select>
 
+      <label for="jobsite">Nombre del sitio de trabajo</label>
+      <input id="jobsite" type="text" placeholder="p. ej., ACME" required />
+
       <div class="camera" style="margin-top:8px">
         <div id="preview" class="preview">📷 Elige o toma una foto</div>
         <div class="camera-actions">
-          <input id="file" type="file" accept="image/*" hidden />
+          <!-- elegir desde archivos -->
+          <input id="file" type="file" accept="image/*" multiple hidden />
+          <!-- cámara nativa en móvil -->
           <input id="cameraFile" type="file" accept="image/*" capture="environment" hidden />
           <button id="chooseBtn"  class="btn btn-sec" type="button">📁 Elegir foto</button>
           <button id="captureBtn" class="btn btn-sec" type="button">📸 Usar cámara</button>
@@ -277,123 +226,215 @@
       </div>
 
       <button id="submitBtn" class="btn btn-primary" style="margin-top:12px" disabled>Enviar</button>
-
-    
     </div>
-    <div class="nav-links" style="margin-top:12px">
-        <a class = "btn-link" href = "/index-es.html">← Volver al Inicio</a>
-      </div>
-  </div>
 
-  <script>
-    let photoBlob=null, stream=null, video=null, msgHideTimer=null;
-    const isMobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const el=id=>document.getElementById(id);
+    <style>
+      .nav-links{margin-top:10px;text-align:center}
+      .btn-link{
+        display:inline-block;padding:12px 16px;border-radius:10px;
+        border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);
+        color:#cfd3d7;text-decoration:none;font-weight:700;letter-spacing:.3px
+      }
+      .btn-link:hover{border-color:#00ff88;box-shadow:0 0 8px rgba(0,255,136,.2);color:#fff}
+    </style>
+    <div class="nav-links">
+      <a class="btn-link" href="/index.html">← Volver al inicio</a>
+    </div>
 
-    function showMsg(text, ok=true){
-      const m=el('message'); m.style.display='block';
-      m.className='msg '+(ok?'ok':'err'); m.textContent=text;
-      if(msgHideTimer) clearTimeout(msgHideTimer);
-      msgHideTimer=setTimeout(()=>{ m.style.display='none'; }, 5000);
-    }
+<script>
+  // ---------- State ----------
+  let selectedFiles = [];
+  let capturedBlob = null;
+  let stream = null, video = null, msgHideTimer = null;
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-    function enableSubmit(){
-      el('submitBtn').disabled = !( el('code').value.trim() && el('location').value && photoBlob );
-    }
+  // ---------- Helpers ----------
+  const $ = id => document.getElementById(id);
+  const code        = $('code');
+  const locationSel = $('location');
+  const jobsite     = $('jobsite');
+  const submitBtn   = $('submitBtn');
 
-    function stopCamera(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } }
-
-    function resetForm(){
-      stopCamera(); photoBlob=null;
-      el('file').value=''; el('cameraFile').value='';
-      el('code').value=''; el('location').selectedIndex=0;
-      el('preview').textContent='📷 Elige o toma una foto';
-      el('captureBtn').textContent='📸 Usar cámara';
-      el('submitBtn').textContent='Enviar'; el('submitBtn').disabled=true;
-    }
-
-    async function loadLocations(){
-    try{
-      // cache-bust so you always get the freshest list
-      const r = await fetch('/api/locations?ts=' + Date.now(), { cache: 'no-store' });
-      const j = await r.json();
-      const sel = el('location');
-
-      const names = (j.locations || [])
-        .slice()
-        .sort((a,b)=> a.localeCompare(b,'en',{sensitivity:'base'}));
-
-      names.forEach(name=>{
-        const opt = document.createElement('option');
-        opt.value = name;                 // keep original value
-        opt.textContent = String(name).toUpperCase(); // show ALL CAPS
-        sel.appendChild(opt);
-      });
-    }catch(e){ console.error(e); }
+  function showMsg(text, ok = true) {
+    const m = $('message');
+    m.style.display = 'block';
+    m.className = 'msg ' + (ok ? 'ok' : 'err');
+    m.textContent = text;
+    clearTimeout(msgHideTimer);
+    msgHideTimer = setTimeout(() => m.style.display = 'none', 5000);
   }
 
-    el('chooseBtn').onclick=()=>el('file').click();
-    el('file').onchange=e=>{
-      const f=e.target.files[0]; if(!f) return;
-      if(!/^image\//.test(f.type)) { showMsg('Selecciona una imagen', false); return; }
-      if(f.size>5*1024*1024) { showMsg('Máximo 5MB', false); return; }
-      photoBlob=f;
-      const r=new FileReader();
-      r.onload=()=>{ el('preview').innerHTML=`<img src="${r.result}" alt="vista previa">`; enableSubmit(); };
-      r.readAsDataURL(f); e.target.value='';
-    };
+  function enableSubmit(){
+    submitBtn.disabled = !(
+      code.value.trim() &&
+      locationSel.value &&
+      jobsite.value.trim() &&
+      (selectedFiles.length > 0 || capturedBlob)
+    );
+  }
 
-    el('captureBtn').onclick=async()=>{
-      if(isMobile){ el('cameraFile').click(); return; }
-      try{
-        if(!stream){
-          stream=await navigator.mediaDevices.getUserMedia({video:true});
-          video=document.createElement('video'); video.autoplay=true; video.srcObject=stream;
-          el('preview').innerHTML=''; el('preview').appendChild(video);
-          el('captureBtn').textContent='📸 Capturar';
-        }else{
-          const c=document.createElement('canvas');
-          c.width=video.videoWidth; c.height=video.videoHeight;
-          c.getContext('2d').drawImage(video,0,0);
-          photoBlob=await new Promise(res=>c.toBlob(res,'image/jpeg',0.85));
-          stopCamera(); el('preview').innerHTML=`<img src="${c.toDataURL()}" alt="capturada">`;
-          el('captureBtn').textContent='📸 Usar cámara'; enableSubmit();
-        }
-      }catch(e){ console.error(e); showMsg('Cámara no disponible', false); }
-    };
+  function stopCamera() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  }
 
-    el('cameraFile').addEventListener('change', e=>{
-      const f=e.target.files[0]; if(!f) return;
-      if(!/^image\//.test(f.type)) { showMsg('Captura una imagen', false); return; }
-      if(f.size>5*1024*1024) { showMsg('Máximo 5MB', false); return; }
-      photoBlob=f; const r=new FileReader();
-      r.onload=()=>{ el('preview').innerHTML=`<img src="${r.result}" alt="vista previa">`; enableSubmit(); };
-      r.readAsDataURL(f); e.target.value='';
+  function clearPreview() {
+    $('preview').innerHTML = '📷 Elige o toma una foto';
+  }
+
+  function renderPreview() {
+    const items = [...selectedFiles];
+    if (capturedBlob) items.unshift(capturedBlob);
+
+    if (items.length === 0) { clearPreview(); return; }
+
+    const container = document.createElement('div');
+    container.style.display = 'grid';
+    container.style.gridTemplateColumns = 'repeat(3, 1fr)';
+    container.style.gap = '6px';
+
+    items.slice(0, 9).forEach((fileOrBlob) => {
+      const url = URL.createObjectURL(fileOrBlob);
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = 'vista previa';
+      img.style.width = '100%';
+      img.style.height = '80px';
+      img.style.objectFit = 'cover';
+      img.onload = () => URL.revokeObjectURL(url);
+      container.appendChild(img);
     });
 
-    el('code').oninput=enableSubmit; el('location').onchange=enableSubmit;
+    $('preview').innerHTML = '';
+    $('preview').appendChild(container);
+  }
 
-    el('submitBtn').onclick=async()=>{
-      const btn=el('submitBtn'); btn.disabled=true; btn.textContent='Subiendo…';
-      try{
-        const fd=new FormData();
-        fd.append('code', el('code').value.trim());
-        fd.append('location', el('location').value);
-        fd.append('photo', photoBlob, 'photo.jpg');
+  function resetForm() {
+    stopCamera();
+    selectedFiles = [];
+    capturedBlob = null;
+    $('file').value = '';
+    $('cameraFile').value = '';
+    code.value = '';
+    locationSel.selectedIndex = 0;
+    jobsite.value = '';
+    clearPreview();
+    $('captureBtn').textContent = '📸 Usar cámara';
+    submitBtn.textContent = 'Enviar';
+    submitBtn.disabled = true;
+  }
 
-        const r=await fetch('/api/submit',{method:'POST',body:fd});
-        const j=await r.json(); if(!r.ok) throw new Error(j.error||'Fallo al enviar');
-        showMsg('✅ Subida exitosa', true);
-      }catch(e){ console.error(e); showMsg('❌ '+e.message, false); }
-      finally{ resetForm(); }
-    };
+  async function loadLocations(){
+    try{
+      const r = await fetch('/api/locations?ts=' + Date.now(), { cache: 'no-store' });
+      const j = await r.json();
+      const names = (j.locations || []).slice().sort(
+        (a,b)=> a.localeCompare(b,'es',{sensitivity:'base'})
+      );
+      names.forEach(name=>{
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = String(name).toUpperCase();
+        locationSel.appendChild(opt);
+      });
+    }catch(e){
+      console.error(e);
+      showMsg('No se pudieron cargar las ubicaciones', false);
+    }
+  }
 
-    loadLocations(); enableSubmit();
-  </script>
+  // ---------- Events ----------
+  jobsite.addEventListener('input', () => { jobsite.value = jobsite.value.toUpperCase(); enableSubmit(); });
+
+  $('chooseBtn').onclick = () => $('file').click();
+
+  $('file').onchange = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    const tooBig = files.find(f => f.size > 5 * 1024 * 1024);
+    if (tooBig) { showMsg('Cada imagen debe ser ≤ 5 MB', false); return; }
+
+    const notImage = files.find(f => !/^image\//.test(f.type));
+    if (notImage) { showMsg('Selecciona solo archivos de imagen', false); return; }
+
+    selectedFiles.push(...files);
+    if (selectedFiles.length > 10) selectedFiles = selectedFiles.slice(0, 10);
+
+    renderPreview();
+    enableSubmit();
+    e.target.value = '';
+  };
+
+  $('captureBtn').onclick = async () => {
+    if (isMobile) { $('cameraFile').click(); return; }
+    try {
+      if (!stream) {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video = document.createElement('video');
+        video.autoplay = true;
+        video.srcObject = stream;
+        $('preview').innerHTML = '';
+        $('preview').appendChild(video);
+        $('captureBtn').textContent = '📸 Capturar';
+      } else {
+        const c = document.createElement('canvas');
+        c.width = video.videoWidth; c.height = video.videoHeight;
+        c.getContext('2d').drawImage(video, 0, 0);
+        capturedBlob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
+        stopCamera();
+        $('captureBtn').textContent = '📸 Usar cámara';
+        renderPreview();
+        enableSubmit();
+      }
+    } catch (e) { console.error(e); showMsg('Cámara no disponible', false); }
+  };
+
+  $('cameraFile').addEventListener('change', (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    if (!/^image\//.test(f.type)) { showMsg('Toma una imagen', false); return; }
+    if (f.size > 5 * 1024 * 1024) { showMsg('Máx 5 MB', false); return; }
+    capturedBlob = f;
+    renderPreview();
+    enableSubmit();
+    e.target.value = '';
+  });
+
+  code.addEventListener('input', enableSubmit);
+  locationSel.addEventListener('change', enableSubmit);
+
+  submitBtn.onclick = async () => {
+    const btn = submitBtn;
+    btn.disabled = true; btn.textContent = 'Subiendo…';
+    try {
+      const fd = new FormData();
+      fd.append('code',     code.value.trim());
+      fd.append('location', locationSel.value);
+      fd.append('jobsite',  jobsite.value.trim());
+
+      selectedFiles.forEach((f, i) => fd.append('photos', f, f.name || `foto-${i+1}.jpg`));
+      if (capturedBlob) fd.append('photos', capturedBlob, 'camara.jpg');
+
+      const r = await fetch('/api/submit', { method: 'POST', body: fd });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Fallo al subir');
+
+      const total = j.count ?? (selectedFiles.length + (capturedBlob?1:0));
+      showMsg(`✅ Se subieron ${total} foto(s)`, true);
+    } catch (e) {
+      console.error(e); showMsg('❌ ' + e.message, false);
+    } finally {
+      resetForm();
+    }
+  };
+
+  // ---------- Init ----------
+  loadLocations();
+  enableSubmit();
+</script>
+
 </body>
 <div class="lang-toggle" role="navigation" aria-label="Idioma">
-  <a href="/Upload.html" hreflang="en">EN</a>
+  <a href="/upload.html" hreflang="en">EN</a>
 </div>
-
 
 </html>

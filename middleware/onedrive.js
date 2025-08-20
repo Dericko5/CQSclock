@@ -1,4 +1,4 @@
-// middleware/onedrive.js - OneDrive integration with shortcut support + target user
+// middleware/onedrive.js — OneDrive integration w/ nested subpaths + shortcut support
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -6,25 +6,28 @@ const mime = require('mime-types');
 
 class OneDriveService {
   constructor(opts = {}) {
-    this.clientId = process.env.AZURE_CLIENT_ID;
+    this.clientId     = process.env.AZURE_CLIENT_ID;
     this.clientSecret = process.env.AZURE_CLIENT_SECRET;
-    this.tenantId = process.env.AZURE_TENANT_ID;
+    this.tenantId     = process.env.AZURE_TENANT_ID;
 
-    // Base folder (allow override for docs)
-    this.folderPath = (opts.folderPath || process.env.ONEDRIVE_FOLDER_PATH || 'TimeClock_Photos');
+    // Base folder inside the target drive (can be a real folder or a shortcut at root)
+    this.folderPath   = (opts.folderPath || process.env.ONEDRIVE_FOLDER_PATH || 'TimeClock_Photos');
 
-    // App runs as this account, but we write into TARGET user
-    this.serviceUpn = process.env.ONEDRIVE_SERVICE_UPN;
-    this.targetUpn  = process.env.ONEDRIVE_TARGET_UPN || this.serviceUpn;
+    // App runs as this account, but targets this user's drive/library
+    this.serviceUpn   = process.env.ONEDRIVE_SERVICE_UPN;
+    this.targetUpn    = process.env.ONEDRIVE_TARGET_UPN || this.serviceUpn;
 
-    this.driveId    = process.env.ONEDRIVE_DRIVE_ID || null;
-    this.rootItemId = null;
+    // Optional: pin a specific drive
+    this.driveId      = process.env.ONEDRIVE_DRIVE_ID || null;
 
-    this.accessToken = null;
-    this.tokenExpiry = null;
+    // If base is a shortcut, we resolve to the target drive + root item id
+    this.rootItemId   = null;
+
+    this.accessToken  = null;
+    this.tokenExpiry  = null;
   }
 
-  // Use pinned drive if provided; otherwise use the TARGET user's drive (Angelica)
+  // Base REST root: a specific drive (if pinned) or the target user's default drive
   baseDriveRoot() {
     return this.driveId
       ? `https://graph.microsoft.com/v1.0/drives/${this.driveId}`
@@ -32,8 +35,9 @@ class OneDriveService {
   }
 
   async getAccessToken() {
-    if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) return this.accessToken;
-
+    if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
+      return this.accessToken;
+    }
     const tokenUrl = `https://login.microsoftonline.com/${this.tenantId}/oauth2/v2.0/token`;
     const params = new URLSearchParams();
     params.append('client_id', this.clientId);
@@ -49,26 +53,26 @@ class OneDriveService {
     return this.accessToken;
   }
 
-  // Resolve whether folderPath is a real folder or a shortcut; pin driveId/rootItemId
+  // If base folder is a shortcut, switch to the remote drive + item id
   async resolveBaseFolderIfNeeded() {
-    if (this.rootItemId) return; // already pinned
+    if (this.rootItemId) return;
     const token = await this.getAccessToken();
-    const root = this.baseDriveRoot();
+    const root  = this.baseDriveRoot();
 
     try {
       const url = `${root}/root:/${this.folderPath}`;
       const { data } = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
 
       if (data.remoteItem?.id && data.remoteItem?.parentReference?.driveId) {
-        // It's a shortcut; switch to the real drive + item
-        this.driveId = data.remoteItem.parentReference.driveId;
+        // Shortcut → pin the remote drive + item
+        this.driveId    = data.remoteItem.parentReference.driveId;
         this.rootItemId = data.remoteItem.id;
-        console.log(`🔗 Resolved shortcut → driveId=${this.driveId}, itemId=${this.rootItemId}`);
+        console.log(`🔗 Base is a shortcut → driveId=${this.driveId}, itemId=${this.rootItemId}`);
       } else {
-        // Real folder in the target user's drive
-        this.driveId = this.driveId || data.parentReference?.driveId || null;
+        // Real folder in this drive
+        this.driveId    = this.driveId || data.parentReference?.driveId || null;
         this.rootItemId = data.id;
-        console.log(`📁 Using folder in target drive → itemId=${this.rootItemId}`);
+        console.log(`📁 Base is local in drive → itemId=${this.rootItemId}`);
       }
     } catch (e) {
       console.error('resolveBaseFolderIfNeeded error:', e?.response?.status, e?.response?.data || e.message);
@@ -76,18 +80,32 @@ class OneDriveService {
     }
   }
 
-  // Ensure a path exists beneath the base folder
+  // Sanitize a single segment (NOT the whole path)
+  sanitizeSegment(s) {
+    return String(s || '')
+      .replace(/[\\/:*?"<>|]/g, '')    // remove illegal path chars
+      .replace(/\s+/g, ' ')            // collapse whitespace
+      .trim();
+  }
+
+  // Ensure a full path exists under the base folder.
+  // targetPath is absolute under the drive root (e.g., "TimeClock_Photos/Companies/…")
   async ensurePathExists(targetPath) {
     await this.resolveBaseFolderIfNeeded();
     const token = await this.getAccessToken();
-    const root = this.baseDriveRoot();
+    const root  = this.baseDriveRoot();
 
-    const relativePath = this.rootItemId
-      ? targetPath.replace(new RegExp(`^${this.folderPath}/?`, 'i'), '')
-      : targetPath;
+    const safePath = targetPath
+      .split('/')
+      .filter(Boolean)
+      .map(seg => this.sanitizeSegment(seg))
+      .join('/');
 
+    // If our base resolved to a shortcut root item, walk children under items/{rootItemId}
     if (this.rootItemId) {
-      const segments = relativePath.split('/').filter(Boolean);
+      // Compute relative segments under the base folder
+      const rel = safePath.replace(new RegExp(`^${this.folderPath}/?`, 'i'), '');
+      const segments = rel.split('/').filter(Boolean);
       let currentId = this.rootItemId;
 
       for (const seg of segments) {
@@ -113,25 +131,17 @@ class OneDriveService {
       return;
     }
 
-    // Fallback: absolute create from drive root
-    try {
-      await axios.get(`${root}/root:/${targetPath}`, { headers: { Authorization: `Bearer ${token}` } });
-      return;
-    } catch (err) {
-      if (err.response?.status !== 404) throw err;
-    }
-
-    const parts = targetPath.split('/').filter(Boolean);
-    let currentPath = '';
+    // Otherwise, create from drive root using root:/path endpoints
+    // Walk each segment so we can create progressively
+    const parts = safePath.split('/').filter(Boolean);
+    let curr = '';
     for (const part of parts) {
-      const parent = currentPath;
-      currentPath = currentPath ? `${currentPath}/${part}` : part;
-
+      const next = curr ? `${curr}/${part}` : part;
       try {
-        await axios.get(`${root}/root:/${currentPath}`, { headers: { Authorization: `Bearer ${token}` } });
+        await axios.get(`${root}/root:/${next}`, { headers: { Authorization: `Bearer ${token}` } });
       } catch (err) {
         if (err.response?.status === 404) {
-          const createUrl = parent ? `${root}/root:/${parent}:/children` : `${root}/root/children`;
+          const createUrl = curr ? `${root}/root:/${curr}:/children` : `${root}/root/children`;
           await axios.post(createUrl, { name: part, folder: {}, '@microsoft.graph.conflictBehavior': 'replace' }, {
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
           });
@@ -139,68 +149,85 @@ class OneDriveService {
           throw err;
         }
       }
+      curr = next;
     }
   }
 
-  // Upload to base folder + subFolder (we pass location as subFolder)
-  // Upload a file to OneDrive under base folder + subfolder (3rd arg)
-async uploadFile(filePath, fileName, subFolder) {
-  await this.resolveBaseFolderIfNeeded();
-  const token = await this.getAccessToken();
+  // Upload a file under base + subPath (subPath can contain multiple segments)
+  async uploadFile(filePath, fileName, subPath = '') {
+    await this.resolveBaseFolderIfNeeded();
+    const token = await this.getAccessToken();
+    const base  = this.baseDriveRoot();
 
-  // Keep spaces if you like; just strip illegal path chars
-  const folderSegment = (subFolder || 'unknown').trim().replace(/[\\/:*?"<>|]/g, '_');
+    // Sanitize file name but keep real extension
+    const rawName  = String(fileName || 'upload.bin').replace(/[\\/:*?"<>|]/g, '').trim();
+    const ext      = path.extname(rawName);
+    const baseName = ext ? rawName.slice(0, -ext.length) : rawName;
 
-  // ✅ Preserve the real extension and append the timestamp BEFORE it
-  const rawName  = fileName.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
-  const ext      = path.extname(rawName) || '';                 // e.g. ".pdf"
-  const baseName = ext ? rawName.slice(0, -ext.length) : rawName;
+    const ts   = new Date().toISOString().replace(/[:.]/g, '-');
+    const rand = Math.random().toString(36).slice(2, 8);
+    const finalName = `${baseName}_${ts}_${rand}${ext || ''}`;
 
-  const ts   = new Date().toISOString().replace(/[:.]/g, '-');
-  const rand = Math.random().toString(36).slice(2, 8);
-  const finalName = `${baseName}_${ts}_${rand}${ext}`;          // e.g. MyW9_2025-08-19T19-21-55-123Z_ab12cd.pdf
+    // Build the full destination folder: base folder + subPath (multi-segment)
+    const safeSubPath = String(subPath || '')
+      .split('/')
+      .filter(Boolean)
+      .map(seg => this.sanitizeSegment(seg))
+      .join('/');
+    const finalFolder = safeSubPath
+      ? `${this.folderPath}/${safeSubPath}`
+      : this.folderPath;
 
-  // Ensure destination folder exists
-  const finalFolder = `${this.folderPath}/${folderSegment}`;
-  await this.ensurePathExists(finalFolder);
+    // Make sure the path exists
+    await this.ensurePathExists(finalFolder);
 
-  // Read RAW bytes (no encoding)
-  let stats;
-  try { stats = fs.statSync(filePath); }
-  catch { throw new Error(`Local file not found: ${filePath}`); }
-  const buffer = fs.readFileSync(filePath);
+    // Read file bytes
+    const stats = fs.statSync(filePath);
+    const buffer = fs.readFileSync(filePath);
+    const contentType = mime.lookup(finalName) || 'application/octet-stream';
 
-  // ✅ Send the correct Content-Type based on the final file name
-  const contentType = mime.lookup(finalName) || 'application/octet-stream';
+    // Build a Graph path where EACH segment is encoded separately
+    const encodePath = (p) => p.split('/').filter(Boolean).map(encodeURIComponent).join('/');
 
-  // Build a path where we URL-encode names but KEEP slashes as separators
-  const relEscaped = [folderSegment, finalName].map(s => encodeURIComponent(s)).join('/');
+    // Relative path beneath base (if base is a shortcut item)
+    const relUnderBase = finalFolder.replace(new RegExp(`^${this.folderPath}/?`, 'i'), '');
 
-  const base = this.baseDriveRoot();
-  const uploadUrl = this.rootItemId
-    ? `${base}/items/${this.rootItemId}:/${relEscaped}:/content?@microsoft.graph.conflictBehavior=replace`
-    // For the root-path style, encode each segment separately as well:
-    : `${base}/root:/${encodeURIComponent(this.folderPath)}/${encodeURIComponent(folderSegment)}/${encodeURIComponent(finalName)}:/content?@microsoft.graph.conflictBehavior=replace`;
+    let uploadUrl;
+    if (this.rootItemId) {
+      const rel = relUnderBase ? `${encodePath(relUnderBase)}/${encodeURIComponent(finalName)}` : encodeURIComponent(finalName);
+      uploadUrl = `${base}/items/${this.rootItemId}:/${rel}:/content?@microsoft.graph.conflictBehavior=replace`;
+    } else {
+      const full = `${encodePath(this.folderPath)}${relUnderBase ? '/' + encodePath(relUnderBase) : ''}/${encodeURIComponent(finalName)}`;
+      uploadUrl = `${base}/root:/${full}:/content?@microsoft.graph.conflictBehavior=replace`;
+    }
 
-  const resp = await axios.put(uploadUrl, buffer, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': contentType,           // ✅ correct MIME (e.g., application/pdf)
-      'Content-Length': stats.size
-    },
-    maxContentLength: Infinity,
-    maxBodyLength: Infinity
-  });
+    // Helpful server log so you can find the file quickly
+    console.log('📤 OneDrive upload →', {
+      driveId: this.driveId || '(target user default)',
+      baseFolder: this.folderPath,
+      subPath: safeSubPath || '(none)',
+      finalFolder,
+      finalName
+    });
 
-  return {
-    oneDriveId: resp.data.id,
-    oneDriveUrl: resp.data.webUrl,
-    fileName: finalName,
-    size: resp.data.size,
-    uploadedAt: new Date().toISOString()
-  };
-}
+    const resp = await axios.put(uploadUrl, buffer, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': contentType,
+        'Content-Length': stats.size
+      },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
+    });
 
+    return {
+      oneDriveId: resp.data.id,
+      oneDriveUrl: resp.data.webUrl,
+      fileName: finalName,
+      size: resp.data.size,
+      uploadedAt: new Date().toISOString()
+    };
+  }
 
   async cleanupLocalFile(filePath) {
     try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
@@ -209,16 +236,16 @@ async uploadFile(filePath, fileName, subFolder) {
   async getFileDownloadUrl(oneDriveId) {
     await this.resolveBaseFolderIfNeeded();
     const token = await this.getAccessToken();
-    const base = this.baseDriveRoot();
-    const url = `${base}/items/${oneDriveId}`;
-    const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+    const base  = this.baseDriveRoot();
+    const url   = `${base}/items/${oneDriveId}`;
+    const res   = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
     return res.data['@microsoft.graph.downloadUrl'];
   }
 
   async listFiles() {
     await this.resolveBaseFolderIfNeeded();
     const token = await this.getAccessToken();
-    const base = this.baseDriveRoot();
+    const base  = this.baseDriveRoot();
 
     const url = this.rootItemId
       ? `${base}/items/${this.rootItemId}/children`

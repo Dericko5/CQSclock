@@ -238,6 +238,33 @@ const uploadDocs = multer({
 // ───────────────────────────────────────────────────────────────────────────────
 // Helpers & config
 // ───────────────────────────────────────────────────────────────────────────────
+// --- Timesheet helpers ---
+// ===== Helpers (place near top of server.js) =====
+function startOfWeek(d) {           // Monday -> Sunday
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const day = x.getDay();           // 0 Sun..6 Sat
+  const diff = (day === 0 ? -6 : 1) - day;
+  x.setDate(x.getDate() + diff);
+  x.setHours(0,0,0,0);
+  return x;
+}
+function endOfWeek(d) {
+  const s = startOfWeek(d);
+  const e = new Date(s);
+  e.setDate(s.getDate() + 6);
+  return e;
+}
+function md(date) {                 // M-D (no leading zeroes)
+  return `${date.getMonth()+1}-${date.getDate()}`;
+}
+function weekSpan(date) {           // "M-D - M-D"
+  return `${md(startOfWeek(date))} - ${md(endOfWeek(date))}`;
+}
+function cleanName(s){              // keep OneDrive happy
+  return (s||'').trim().replace(/[\\/:*?"<>|]/g,'').replace(/\s+/g,' ').trim();
+}
+
+
 const authorizedEmails = (process.env.AUTHORIZED_EMAILS || '')
   .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
 function isAuthorizedEmail(email) {
@@ -282,36 +309,95 @@ app.get('/api/locations', (_req, res) => {
   res.json({ ok: true, locations: LOCATIONS.locations || [] });
 });
 
-app.post('/api/submit', upload.single('photo'), async (req, res) => {
-  try {
-    const code     = (req.body.code || '').trim();
-    const location = (req.body.location || '').trim();
-    if (!code || !location) throw new Error('Code and location are required');
-    if (!UNIVERSAL_CODE || code !== UNIVERSAL_CODE) return res.status(401).json({ error: 'Invalid code' });
-    if (!LOCATIONS.locations.includes(location)) return res.status(400).json({ error: 'Unknown location' });
-    if (!req.file) return res.status(400).json({ error: 'Photo is required' });
+// Timesheet upload: Company / WeekRange / Jobsite  ->  file named by date (M-D)
+app.post(
+  '/api/submit',
+  // Accept either "photos" (multiple) or "photo" (single)
+  upload.fields([
+    { name: 'photos', maxCount: 10 },
+    { name: 'photo',  maxCount: 1  },
+  ]),
+  async (req, res) => {
+    try {
+      const code     = (req.body.code || '').trim();
+      const location = cleanName(req.body.location);
+      const jobsite  = cleanName(req.body.jobsite);
 
-    const todayCount = await db.countLocationUploadsToday(code, location);
-    if (todayCount >= DAILY_UPLOAD_LIMIT) {
-      fs.existsSync(req.file.path) && fs.unlinkSync(req.file.path);
-      return res.status(429).json({ error: `Daily limit reached (${DAILY_UPLOAD_LIMIT}) for ${location}` });
+      const files = [
+        ...(req.files?.photos || []),
+        ...(req.files?.photo  || []),
+      ];
+
+      if (!code || !location || !jobsite) {
+        files.forEach(f => { try { fs.existsSync(f.path) && fs.unlinkSync(f.path); } catch {} });
+        return res.status(400).json({ error: 'Code, location and jobsite are required' });
+      }
+      if (!UNIVERSAL_CODE || code !== UNIVERSAL_CODE) {
+        files.forEach(f => { try { fs.existsSync(f.path) && fs.unlinkSync(f.path); } catch {} });
+        return res.status(401).json({ error: 'Invalid code' });
+      }
+      if (!LOCATIONS.locations.includes(location)) {
+        files.forEach(f => { try { fs.existsSync(f.path) && fs.unlinkSync(f.path); } catch {} });
+        return res.status(400).json({ error: 'Unknown location' });
+      }
+      if (files.length === 0) {
+        return res.status(400).json({ error: 'At least one photo is required' });
+      }
+
+      // daily limit (per code+location)
+      const todayCount = await db.countLocationUploadsToday(code, location);
+      const remaining  = DAILY_UPLOAD_LIMIT - todayCount;
+      if (remaining <= 0) {
+        files.forEach(f => { try { fs.existsSync(f.path) && fs.unlinkSync(f.path); } catch {} });
+        return res.status(429).json({ error: `Daily limit reached (${DAILY_UPLOAD_LIMIT}) for ${location}` });
+      }
+      if (files.length > remaining) {
+        files.forEach(f => { try { fs.existsSync(f.path) && fs.unlinkSync(f.path); } catch {} });
+        return res.status(429).json({ error: `You can upload ${remaining} more photo(s) today for ${location}` });
+      }
+
+      // --- build nested path: Location -> Week -> Jobsite -> DateFolder ---
+      const now        = new Date();
+      const weekLabel  = weekSpan(now);     // e.g. "8-18 - 8-24"
+      const dateFolder = md(now);           // e.g. "8-20"
+
+      // If ONEDRIVE_FOLDER_PATH already includes TimeClock_Photos, don’t add it again.
+      const basePath       = oneDriveService.folderPath || '';
+      const needsTimeClock = !/(^|\/)TimeClock_Photos(\/|$)/i.test(basePath);
+      const subPrefix      = needsTimeClock ? 'TimeClock_Photos' : '';
+      const subPath        = [subPrefix, location, weekLabel, jobsite, dateFolder].filter(Boolean).join('/');
+
+      const results = [];
+      for (const f of files) {
+        const ext        = (path.extname(f.originalname || '').toLowerCase()) || '.jpg';
+        const remoteName = `${dateFolder}${ext}`; // onedrive.js appends a timestamp so no clashes
+        const info       = await oneDriveService.uploadFile(f.path, remoteName, subPath);
+
+        // record each file
+        await db.recordLocationUpload(code, location, f.originalname, f.filename, f.size);
+
+        results.push({ id: info.oneDriveId, url: info.oneDriveUrl, name: info.fileName });
+        try { fs.existsSync(f.path) && fs.unlinkSync(f.path); } catch {}
+      }
+
+      return res.json({
+        ok: true,
+        location,
+        jobsite,
+        week: weekLabel,
+        dateFolder,
+        count: results.length,
+        files: results,
+      });
+    } catch (e) {
+      console.error('submit error:', e?.response?.data || e.message);
+      (req.files?.photos || []).concat(req.files?.photo || []).forEach(f => {
+        try { fs.existsSync(f.path) && fs.unlinkSync(f.path); } catch {}
+      });
+      res.status(500).json({ error: 'Submit failed', detail: e.message });
     }
-
-    const localRec = await db.recordLocationUpload(
-      code, location, req.file.originalname, req.file.filename, req.file.size
-    );
-
-    const uploaded = await oneDriveService.uploadFile(req.file.path, req.file.originalname, location);
-    await db.setLocationUploadUrl(localRec.id, uploaded.oneDriveUrl);
-    await oneDriveService.cleanupLocalFile(req.file.path);
-
-    res.json({ ok: true, location, webUrl: uploaded.oneDriveUrl });
-  } catch (e) {
-    console.error('submit error:', e?.response?.data || e.message);
-    if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    res.status(500).json({ error: 'Submit failed', detail: e.message });
   }
-});
+);
 
 app.post('/api/clock-in', upload.single('photo'), async (req, res) => {
   try {
