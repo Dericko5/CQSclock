@@ -233,6 +233,32 @@
         <a id="w9Download" class="btn-link" href="/download/w9">⬇️ Descargar W-9 (PDF)</a>
       </div>
     </div>
+    <div class="card" id="iosHelpES" style="margin-top:16px">
+      <label style="margin-top:0">¿Problemas para descargar o editar el W-9 en iPhone?</label>
+      <div class="note">Si Safari abre el PDF en lugar de descargarlo:</div>
+      <ol style="margin-left:18px">
+        <li>Toca el ícono de <strong>Compartir</strong>.</li>
+        <li>Elige <strong>Guardar en Archivos</strong> (o <strong>Guardar en Descargas</strong>).</li>
+        <li>Ábrelo luego desde la app <strong>Archivos</strong>.</li>
+      </ol>
+
+      <div class="note" style="margin-top:10px">Para rellenar o firmar en el teléfono:</div>
+      <ol style="margin-left:18px">
+        <li>Abre el PDF en <strong>Archivos</strong> y toca <strong>Marcado</strong> (icono de lápiz) para añadir texto/firma.</li>
+        <li>O compártelo como imagen a <strong>Fotos</strong>, luego en Fotos → <strong>Editar</strong> → <strong>Marcado</strong>.</li>
+      </ol>
+
+      <div class="note" style="margin-top:10px">
+        Tip: En iPhone/iPad también puedes <strong>mantener presionado</strong> el botón “Descargar W-9” y elegir <em>Descargar archivo enlazado</em>.
+      </div>
+
+      <div class="center">
+        <a id="zipAltES" class="btn-ghost" href="/download/w9?as=zip" style="display:none">Probar descarga ZIP (iOS)</a>
+        <div class="center">
+          <a class="btn-link" href="https://www.youtube.com/watch?v=E3yc-8uSPy4&ab_channel=AcademiaInfoApps" target="_blank" rel="noopener">Ver cómo guardar y anotar</a>
+        </div>
+      </div>
+    </div>
 
     <div class="card">
       <label for="code">Código de acceso</label>
@@ -259,6 +285,20 @@
   </div>
 
   <script>
+  (async () => {
+    const ua = navigator.userAgent || "";
+    const isIOS = /iP(hone|ad|od)/i.test(ua);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
+    if (!isIOS || !isSafari) return;
+
+    try {
+      const r = await fetch('/download/w9?as=zip', { method: 'HEAD', cache: 'no-store' });
+      if (r.ok) {
+        const a = document.getElementById('zipAltEN');
+        if (a) a.style.display = 'inline-block';
+      }
+    } catch {}
+  })();
     const el=id=>document.getElementById(id);
     let msgTimer=null;
 

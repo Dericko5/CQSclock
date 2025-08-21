@@ -163,13 +163,30 @@ app.get('/w9', (_req, res) => {
 });
 
 // Force download (mobile-friendly)
-app.get('/download/w9', (_req, res, next) => {
-  fs.access(W9_ABS_PATH, fs.constants.R_OK, (err) => {
-    if (err) return res.status(404).send('W-9 file not found');
-    res.download(W9_ABS_PATH, path.basename(W9_ABS_PATH), (e) => e && next(e));
-  });
-});
+  const archiver = require('archiver');
 
+  app.get('/download/w9', (_req, res, next) => {
+    // ZIP fallback
+    if (_req.query.as === 'zip') {
+      try {
+        if (!fs.existsSync(W9_ABS_PATH)) return res.status(404).send('W-9 file not found');
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', 'attachment; filename="W9.zip"');
+        const archive = archiver('zip', { zlib: { level: 9 } });
+        archive.on('error', err => next(err));
+        archive.pipe(res);
+        archive.file(W9_ABS_PATH, { name: 'W9.pdf' });
+        archive.finalize();
+      } catch (e) { next(e); }
+      return;
+    }
+
+    // your existing direct download (may preview on Safari)
+    fs.access(W9_ABS_PATH, fs.constants.R_OK, (err) => {
+      if (err) return res.status(404).send('W-9 file not found');
+      res.download(W9_ABS_PATH, path.basename(W9_ABS_PATH), (e) => e && next(e));
+    });
+  });
 // Lightweight HEAD probe (if you use it client-side)
 app.head('/download/w9', (_req, res) => {
   fs.access(W9_ABS_PATH, fs.constants.R_OK, (err) => res.sendStatus(err ? 404 : 200));

@@ -209,6 +209,8 @@
       <select id="location" required>
         <option value="">Select a location…</option>
       </select>
+        <label for="date">Date (optional)</label>
+        <input id="date" type="date" max="9999-12-31" />
 
       <label for="jobsite">Jobsite name</label>
       <input id="jobsite" type="text" placeholder="e.g., ACME" required />
@@ -254,6 +256,17 @@
   const locationSel = $('location');
   const jobsite     = $('jobsite');
   const submitBtn   = $('submitBtn');
+  const dateEl = document.getElementById('date');
+
+  (function setMaxToday(){
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm   = String(d.getMonth() + 1).padStart(2,'0');
+    const dd   = String(d.getDate()).padStart(2,'0');
+    dateEl.max = `${yyyy}-${mm}-${dd}`;
+  })();
+
+   dateEl.addEventListener('change', enableSubmit); 
 
   function showMsg(text, ok = true) {
     const m = $('message');
@@ -418,9 +431,12 @@
       fd.append('location', locationSel.value);
       fd.append('jobsite',  jobsite.value.trim());
 
-      // Send ALL files under "photos"
+      // send all photos as before
       selectedFiles.forEach((f, i) => fd.append('photos', f, f.name || `photo-${i+1}.jpg`));
       if (capturedBlob) fd.append('photos', capturedBlob, 'camera.jpg');
+
+      // only send date if user picked one (YYYY-MM-DD)
+      if (dateEl.value) fd.append('date', dateEl.value);   // <-- NEW
 
       const r = await fetch('/api/submit', { method: 'POST', body: fd });
       const j = await r.json();
