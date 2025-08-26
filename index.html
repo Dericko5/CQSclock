@@ -41,6 +41,30 @@
     }
     .card span{display:block;color:#9aa0a6;font-weight:600;margin-top:6px;font-size:13px}
     .card:hover{transform:translateY(-2px);border-color:#00ff88;box-shadow:0 8px 28px rgba(0,255,136,.18)}
+
+      .admin-wrap{display:flex;justify-content:center;margin-top:10px}
+      .btn-admin{
+        display:inline-block;width:33%; min-width:140px; text-align:center;
+        padding:12px 16px;border-radius:10px;border:1px solid rgba(255,255,255,.2);
+        background:rgba(255,255,255,.06);color:#cfd3d7;text-decoration:none;font-weight:700;
+      }
+      .btn-admin:hover{border-color:#ff0606;box-shadow:0 0 8px rgba(92, 0, 0, 0.22);color:#fff}
+
+      /* keep your original .btn-admin styles, then add these */
+      @keyframes pulseGlow{
+        0%,100%{ box-shadow: 0 0 0 rgba(92, 0, 0, 0.22); }
+        50%{
+          box-shadow:
+            0 0 12px rgba(255, 0, 0, 0.35),
+            0 0 28px rgba(92, 0, 0, 0.22);
+        }
+      }
+      .btn-admin.glow{ animation: pulseGlow 2.4s ease-in-out infinite; }
+
+      /* accessibility: respect reduced motion */
+      @media (prefers-reduced-motion: reduce){
+        .btn-admin.glow{ animation: none; }
+      }
   </style>
 </head>
 <body>
@@ -55,6 +79,9 @@
       <a class="card" href="/documents.html">📄 Employee Documents
         <span>Upload W-9 and Driver’s License to Worker_Documents.</span>
       </a>
+    </div>
+    <div class="admin-wrap">
+      <a class="btn-admin glow" href="/admin.html">Admin Access</a>
     </div>
   </div>
 </body>

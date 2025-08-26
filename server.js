@@ -302,6 +302,19 @@ catch { console.warn('⚠️  config/locations.json missing or invalid; dropdown
 
 const DAILY_UPLOAD_LIMIT = parseInt(process.env.DAILY_UPLOAD_LIMIT || '5', 10);
 const UNIVERSAL_CODE     = (process.env.UNIVERSAL_CODE || '').trim();
+const ADMIN_CODE = (process.env.ADMIN_CODE || process.env.UNIVERSAL_CODE || '').trim();
+
+function saveLocationsFile(list) {
+  const cfgDir = path.dirname(locationsConfigPath);
+  if (!fs.existsSync(cfgDir)) fs.mkdirSync(cfgDir, { recursive: true });
+
+  const tmpPath = locationsConfigPath + '.tmp';
+  const payload = JSON.stringify({ locations: list }, null, 2);
+  fs.writeFileSync(tmpPath, payload, 'utf8');
+  fs.renameSync(tmpPath, locationsConfigPath);
+}
+
+
 
 // ───────────────────────────────────────────────────────────────────────────────
 // API
@@ -415,6 +428,52 @@ app.post(
     }
   }
 );
+
+// Add a new location (admin only)
+app.post('/api/admin/locations', async (req, res) => {
+  try {
+    const { code, name, confirm } = req.body || {};
+    if (!ADMIN_CODE || code !== ADMIN_CODE) {
+      return res.status(401).json({ error: 'Invalid admin code' });
+    }
+
+    const rawName = String(name || '').trim();
+    const rawConfirm = String(confirm || '').trim();
+    if (!rawName || !rawConfirm) {
+      return res.status(400).json({ error: 'Both name fields are required' });
+    }
+    if (rawName.toUpperCase() !== rawConfirm.toUpperCase()) {
+      return res.status(400).json({ error: 'Names do not match' });
+    }
+
+    // Normalize to uppercase to match your UI rule
+    const finalName = rawName.toUpperCase()
+      .replace(/[\\/:*?"<>|]/g, '')  // keep OneDrive-safe
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // De-duplicate (case-insensitive)
+    const existing = new Set((LOCATIONS.locations || []).map(s => s.toUpperCase()));
+    if (existing.has(finalName)) {
+      return res.json({ ok: true, message: 'Location already exists', name: finalName, locations: LOCATIONS.locations });
+    }
+
+    // Append & sort (case-insensitive)
+    const updated = [...(LOCATIONS.locations || []), finalName]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+
+    // Persist + update in-memory
+    saveLocationsFile(updated);
+    LOCATIONS.locations = updated;
+
+    res.json({ ok: true, name: finalName, count: updated.length, locations: updated });
+  } catch (e) {
+    console.error('Add location error:', e);
+    res.status(500).json({ error: 'Failed to add location' });
+  }
+});
+
 
 app.post('/api/clock-in', upload.single('photo'), async (req, res) => {
   try {
