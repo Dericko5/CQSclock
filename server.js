@@ -17,6 +17,16 @@ const fs        = require('fs');
 const W9_FILE     = process.env.W9_FILE || 'IRS-Form-W9-2024.pdf';
 const W9_ABS_PATH = path.join(__dirname, W9_FILE);
 console.log('📄 W-9 path:', W9_ABS_PATH);
+// Parse "YYYY-MM-DD" from client without timezone shift.
+// We create a noon (12:00) date so DST/offsets don't roll the day.
+function parseClientYMD(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
+  if (!m) return null;
+  const y = +m[1], mo = +m[2] - 1, d = +m[3];
+  // Use local time at noon to avoid crossing days due to TZ shifts
+  return new Date(y, mo, d, 12, 0, 0, 0);
+}
+
 
 // Find pdfjs-dist viewer & build dirs no matter which layout your version uses
 function resolvePdfjs() {
@@ -296,9 +306,35 @@ async function uploadToOneDriveAsync(localPath, subFolder, remoteName) {
 }
 
 const locationsConfigPath = path.join(__dirname, 'config', 'locations.json');
-let LOCATIONS = { locations: [] };
-try { LOCATIONS = JSON.parse(fs.readFileSync(locationsConfigPath, 'utf8')); }
-catch { console.warn('⚠️  config/locations.json missing or invalid; dropdown will be empty.'); }
+
+function loadLocationsFromDisk() {
+  try {
+    const raw = fs.readFileSync(locationsConfigPath, 'utf8');
+    const data = JSON.parse(raw);
+
+    // Accept either a bare array or { locations: [...] }
+    if (Array.isArray(data))           return { locations: data };
+    if (Array.isArray(data.locations)) return { locations: data.locations };
+
+    console.warn('⚠️  locations.json has unexpected structure; using empty list.');
+  } catch (e) {
+    console.warn('⚠️  locations.json missing/invalid; dropdown will be empty.', e.message);
+  }
+  return { locations: [] };
+}
+
+// Initial in-memory copy (will be refreshed per request below)
+let LOCATIONS = loadLocationsFromDisk();
+
+function saveLocationsFile(list) {
+  const cfgDir = path.dirname(locationsConfigPath);
+  if (!fs.existsSync(cfgDir)) fs.mkdirSync(cfgDir, { recursive: true });
+
+  const tmpPath = locationsConfigPath + '.tmp';
+  const payload = JSON.stringify({ locations: list }, null, 2);
+  fs.writeFileSync(tmpPath, payload, 'utf8');
+  fs.renameSync(tmpPath, locationsConfigPath);
+}
 
 const DAILY_UPLOAD_LIMIT = parseInt(process.env.DAILY_UPLOAD_LIMIT || '5', 10);
 const UNIVERSAL_CODE     = (process.env.UNIVERSAL_CODE || '').trim();
@@ -313,6 +349,7 @@ function saveLocationsFile(list) {
   fs.writeFileSync(tmpPath, payload, 'utf8');
   fs.renameSync(tmpPath, locationsConfigPath);
 }
+
 
 
 
@@ -336,8 +373,11 @@ app.get('/api/status/:email', async (req, res) => {
 });
 
 app.get('/api/locations', (_req, res) => {
+  LOCATIONS = loadLocationsFromDisk(); // hot reload from disk on every call
+  console.log('📍 /api/locations ->', LOCATIONS.locations.length, 'items');
   res.json({ ok: true, locations: LOCATIONS.locations || [] });
 });
+
 
 // Timesheet upload: Company / WeekRange / Jobsite  ->  file named by date (M-D)
 app.post(
@@ -387,9 +427,14 @@ app.post(
       }
 
       // --- build nested path: Location -> Week -> Jobsite -> DateFolder ---
-      const now        = new Date();
-      const weekLabel  = weekSpan(now);     // e.g. "8-18 - 8-24"
-      const dateFolder = md(now);           // e.g. "8-20"
+    // --- build nested path: Location -> Week -> Jobsite -> DateFolder ---
+    // Accept several possible field names from the client; use first non-empty.
+    const dateStr = (req.body.date || req.body.selectedDate || req.body.photoDate || '').trim();
+    const refDate = parseClientYMD(dateStr) || new Date();   // fallback to "today" if missing/invalid
+    const weekLabel  = weekSpan(refDate);  // e.g. "8-18 - 8-24" based on the selected day
+    const dateFolder = md(refDate);        // e.g. "8-25"
+    console.log('🗓️ Using refDate:', refDate.toString(), 'from payload:', dateStr || '(today)');
+            // e.g. "8-20"
 
       // If ONEDRIVE_FOLDER_PATH already includes TimeClock_Photos, don’t add it again.
       const basePath       = oneDriveService.folderPath || '';
